@@ -2,7 +2,7 @@
   "expo": {
     "name": "Offline Chess",
     "slug": "vault-app",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "scheme": "vault",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
@@ -50,6 +50,10 @@
           "savePhotosPermission": "Manage imported media.",
           "isAccessMediaLocationEnabled": true
         }
+      ],
+      [
+        "expo-camera",
+        { "cameraPermission": "Capture photos directly into the app." }
       ]
     ],
     "runtimeVersion": {

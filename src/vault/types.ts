@@ -13,6 +13,8 @@ export interface VaultItem {
   isJson?: boolean;
   // Origin URL for files downloaded via the in-app browser.
   sourceUrl?: string;
+  // Optional album/folder for organization.
+  album?: string;
 }
 
 // Plaintext metadata, readable BEFORE unlock. Reveals nothing about content —
@@ -22,6 +24,17 @@ export interface VaultManifest {
   kdf: { salt: string; iterations: number };
   wrappedDek: Sealed; // the DEK, encrypted under the master key
   verifier: Sealed; // known plaintext encrypted under the master key
+  // Optional duress ("decoy") credential. A different password that unlocks a
+  // SEPARATE decoy vault (its own DEK + index), giving plausible deniability:
+  // an attacker who forces a password sees a believable, benign vault while the
+  // real items stay encrypted under a key the duress password can't derive.
+  // Its presence is indistinguishable from a vault that simply has two
+  // passwords — the manifest reveals nothing about which is "real".
+  duress?: {
+    kdf: { salt: string; iterations: number };
+    wrappedDek: Sealed; // the DECOY dek, wrapped under the duress key
+    verifier: Sealed;
+  };
 }
 
 // The item index, stored ENCRYPTED under the DEK (so even names are private).
@@ -39,4 +52,5 @@ export interface VaultBackup {
 }
 
 export const INDEX_ID = "__index__";
+export const DECOY_INDEX_ID = "__decoy_index__";
 export const VERIFIER_PLAINTEXT = "vault-ok";

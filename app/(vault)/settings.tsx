@@ -17,6 +17,9 @@ export default function Settings() {
   const [oldPw, setOldPw] = useState("");
   const [newPw, setNewPw] = useState("");
   const [backupPw, setBackupPw] = useState("");
+  const [duressPw, setDuressPw] = useState("");
+  const [hasDuress, setHasDuress] = useState(false);
+  const [isDecoy, setIsDecoy] = useState(false);
 
   // restore flow
   const [restoreArchive, setRestoreArchive] = useState<string | null>(null);
@@ -27,7 +30,27 @@ export default function Settings() {
   useEffect(() => {
     vault.biometricAvailable().then(setBioOn);
     biometricHardwareAvailable().then(setBioHw);
+    vault.hasDuress().then(setHasDuress);
+    setIsDecoy(vault.isDecoy());
   }, [vault]);
+
+  async function saveDuress() {
+    if (duressPw.length < 8) {
+      Alert.alert("Weak password", "Decoy password must be at least 8 characters.");
+      return;
+    }
+    try {
+      await vault.setDuressPassword(duressPw);
+      setDuressPw("");
+      setHasDuress(true);
+      Alert.alert(
+        "Decoy set",
+        "Entering this password at unlock opens a separate, empty vault — your real items stay hidden."
+      );
+    } catch (e) {
+      Alert.alert("Error", e instanceof Error ? e.message : "Failed");
+    }
+  }
 
   async function toggleBio() {
     if (bioOn) {
@@ -147,6 +170,18 @@ export default function Settings() {
         <Field value={newPw} onChangeText={setNewPw} placeholder="New password" secureTextEntry />
         <Button label="Change password" onPress={changePassword} variant="outline" />
       </Section>
+
+      {!isDecoy && (
+        <Section icon="eye-off-outline" title="Decoy (duress) password">
+          <Muted>
+            Set a second password that opens a separate, empty vault. If anyone
+            ever forces you to unlock, give them this one — your real items stay
+            encrypted and invisible. {hasDuress ? "A decoy is currently set; saving replaces it." : ""}
+          </Muted>
+          <Field value={duressPw} onChangeText={setDuressPw} placeholder="Decoy password" secureTextEntry />
+          <Button label={hasDuress ? "Replace decoy password" : "Set decoy password"} onPress={saveDuress} variant="outline" />
+        </Section>
+      )}
 
       <Section icon="cloud-upload-outline" title="Encrypted backup">
         <Muted>

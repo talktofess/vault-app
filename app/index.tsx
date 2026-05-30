@@ -15,7 +15,9 @@ export default function Index() {
       if (!active) return;
       if (!exists) router.replace("/onboarding");
       else if (unlocked) router.replace("/(vault)/media");
-      else router.replace("/unlock");
+      // When locked, show the chess disguise — not the unlock screen. The
+      // secret tap sequence on the board leads to /unlock.
+      else router.replace("/chess");
     })();
     return () => {
       active = false;

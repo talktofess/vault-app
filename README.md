@@ -9,6 +9,17 @@ rest**, unlocked by a master password or biometrics. Everything stays on your
 device; there is no server and no account.
 
 ## What's inside
+- **Chess disguise.** When locked, the app opens to a **real, playable chess
+  board** ("Offline Chess"). A secret sequence of corner taps (a1 → h8 → h1 → a8)
+  reveals the unlock screen. Any wrong tap silently resets — there's no hint the
+  door exists.
+- **Decoy (duress) password.** Set a second password that unlocks a separate,
+  **empty** vault. If you're ever forced to open the app, give that one — your
+  real items stay encrypted under a key the decoy password can't derive, and are
+  invisible. The manifest doesn't reveal which password is "real."
+- **In-app camera.** Capture a photo **straight into the vault** — it never
+  touches the camera roll, so there's nothing to delete afterward.
+- **Albums & search.** Organize items into albums and search by name.
 - **Locks instantly on exit.** The moment the app leaves the foreground, the key
   is wiped from memory — you re-unlock every time you return.
 - **Hidden storage.** Data lives in the app's private sandbox in a nondescript

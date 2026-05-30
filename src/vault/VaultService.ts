@@ -13,6 +13,7 @@ import { randomBytes } from "../crypto/random";
 import { bytesToUtf8, fromB64, toB64, utf8ToBytes } from "../crypto/b64";
 import type { Keychain, Storage } from "./ports";
 import {
+  DECOY_INDEX_ID,
   INDEX_ID,
   VERIFIER_PLAINTEXT,
   type ItemType,
@@ -31,6 +32,8 @@ function newId(): string {
 export class VaultService {
   private dek: Uint8Array | null = null; // present only while unlocked
   private index: VaultIndex | null = null;
+  private indexId: string = INDEX_ID; // switches to the decoy index under duress
+  private decoy = false; // true when unlocked via the duress password
 
   constructor(
     private storage: Storage,
@@ -51,6 +54,13 @@ export class VaultService {
     if (this.dek) this.dek.fill(0);
     this.dek = null;
     this.index = null;
+    this.indexId = INDEX_ID;
+    this.decoy = false;
+  }
+
+  /** True when the current session was opened with the duress password. */
+  isDecoy(): boolean {
+    return this.decoy;
   }
 
   /** First-run: set the master password, generate the DEK, write the manifest. */
@@ -77,21 +87,90 @@ export class VaultService {
     return JSON.parse(raw) as VaultManifest;
   }
 
-  /** Unlock with the master password. Returns false on wrong password. */
+  /**
+   * Unlock with the master password. Returns false on wrong password. If a
+   * duress password is configured and matches, this unlocks the DECOY vault
+   * instead (isDecoy() === true) — the caller can't tell the difference, which
+   * is the point.
+   */
   async unlock(password: string): Promise<boolean> {
     const m = await this.loadManifest();
+
+    // 1. try the real password
     const mk = deriveKey(password, fromB64(m.kdf.salt), m.kdf.iterations);
-    let dek: Uint8Array;
     try {
-      // verifier must decrypt to the known plaintext, else password is wrong
-      if (bytesToUtf8(open(mk, m.verifier)) !== VERIFIER_PLAINTEXT) return false;
-      dek = open(mk, m.wrappedDek);
+      if (bytesToUtf8(open(mk, m.verifier)) === VERIFIER_PLAINTEXT) {
+        this.dek = open(mk, m.wrappedDek);
+        this.decoy = false;
+        this.indexId = INDEX_ID;
+        await this.loadIndex();
+        return true;
+      }
     } catch {
-      return false;
+      /* fall through to duress check */
     }
-    this.dek = dek;
-    await this.loadIndex();
-    return true;
+
+    // 2. try the duress password -> decoy vault
+    if (m.duress) {
+      const dmk = deriveKey(password, fromB64(m.duress.kdf.salt), m.duress.kdf.iterations);
+      try {
+        if (bytesToUtf8(open(dmk, m.duress.verifier)) === VERIFIER_PLAINTEXT) {
+          this.dek = open(dmk, m.duress.wrappedDek);
+          this.decoy = true;
+          this.indexId = DECOY_INDEX_ID;
+          await this.loadIndex();
+          return true;
+        }
+      } catch {
+        /* wrong */
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Configure (or replace) the duress password. Must be unlocked with the REAL
+   * password. Generates a fresh decoy DEK + empty decoy index so the duress
+   * login opens a believable, empty vault. Refuses if the duress password
+   * equals the real one.
+   */
+  async setDuressPassword(duressPassword: string): Promise<void> {
+    this.requireUnlocked();
+    if (this.decoy) throw new Error("Cannot set a duress password from the decoy vault");
+    // ensure it isn't the real password (which would shadow the real vault)
+    const m = await this.loadManifest();
+    const asReal = deriveKey(duressPassword, fromB64(m.kdf.salt), m.kdf.iterations);
+    try {
+      if (bytesToUtf8(open(asReal, m.verifier)) === VERIFIER_PLAINTEXT) {
+        throw new Error("Duress password must differ from your real password");
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message.startsWith("Duress password must")) throw e;
+      /* good: it doesn't match the real password */
+    }
+
+    const salt = randomBytes(SALT_LEN);
+    const dmk = deriveKey(duressPassword, salt);
+    const decoyDek = randomBytes(32);
+    const updated: VaultManifest = {
+      ...m,
+      duress: {
+        kdf: { salt: toB64(salt), iterations: KDF_ITERATIONS },
+        wrappedDek: seal(dmk, decoyDek),
+        verifier: seal(dmk, utf8ToBytes(VERIFIER_PLAINTEXT)),
+      },
+    };
+    await this.storage.writeManifest(JSON.stringify(updated));
+    // seed an empty decoy index so the decoy login lands on a clean vault
+    const emptyIndex: VaultIndex = { items: [] };
+    const sealed = seal(decoyDek, utf8ToBytes(JSON.stringify(emptyIndex)));
+    await this.storage.writeBlob(DECOY_INDEX_ID, utf8ToBytes(JSON.stringify(sealed)));
+  }
+
+  async hasDuress(): Promise<boolean> {
+    const m = await this.loadManifest();
+    return m.duress !== undefined;
   }
 
   // ---- biometric unlock ----
@@ -122,7 +201,7 @@ export class VaultService {
   // ---- index ----
 
   private async loadIndex(): Promise<void> {
-    const blob = await this.storage.readBlob(INDEX_ID);
+    const blob = await this.storage.readBlob(this.indexId);
     if (!blob) {
       this.index = { items: [] };
       return;
@@ -133,7 +212,7 @@ export class VaultService {
 
   private async persistIndex(): Promise<void> {
     const sealed = seal(this.dek!, utf8ToBytes(JSON.stringify(this.index)));
-    await this.storage.writeBlob(INDEX_ID, utf8ToBytes(JSON.stringify(sealed)));
+    await this.storage.writeBlob(this.indexId, utf8ToBytes(JSON.stringify(sealed)));
   }
 
   // ---- items ----
@@ -147,7 +226,13 @@ export class VaultService {
     type: ItemType,
     name: string,
     data: Uint8Array,
-    opts: { mime?: string; isJson?: boolean; createdAt?: number; sourceUrl?: string } = {}
+    opts: {
+      mime?: string;
+      isJson?: boolean;
+      createdAt?: number;
+      sourceUrl?: string;
+      album?: string;
+    } = {}
   ): Promise<VaultItem> {
     this.requireUnlocked();
     const item: VaultItem = {
@@ -158,6 +243,7 @@ export class VaultService {
       mime: opts.mime,
       isJson: opts.isJson,
       sourceUrl: opts.sourceUrl,
+      album: opts.album,
       createdAt: opts.createdAt ?? nowMs(),
     };
     const sealed = seal(this.dek!, data);
@@ -180,6 +266,37 @@ export class VaultService {
     await this.storage.deleteBlob(id);
     this.index!.items = this.index!.items.filter((i) => i.id !== id);
     await this.persistIndex();
+  }
+
+  /** Rename an item and/or move it to an album (pass album: "" to clear). */
+  async updateItemMeta(
+    id: string,
+    changes: { name?: string; album?: string }
+  ): Promise<void> {
+    this.requireUnlocked();
+    const item = this.index!.items.find((i) => i.id === id);
+    if (!item) throw new Error("Item not found");
+    if (changes.name !== undefined) item.name = changes.name;
+    if (changes.album !== undefined) item.album = changes.album || undefined;
+    await this.persistIndex();
+  }
+
+  /** Distinct album names across items, sorted. */
+  albums(): string[] {
+    this.requireUnlocked();
+    const set = new Set<string>();
+    for (const i of this.index!.items) if (i.album) set.add(i.album);
+    return [...set].sort();
+  }
+
+  /** Search items by name (case-insensitive substring), newest first. */
+  search(query: string): VaultItem[] {
+    this.requireUnlocked();
+    const q = query.trim().toLowerCase();
+    const items = q
+      ? this.index!.items.filter((i) => i.name.toLowerCase().includes(q))
+      : [...this.index!.items];
+    return items.sort((a, b) => b.createdAt - a.createdAt);
   }
 
   // ---- password change (re-wrap DEK only) ----

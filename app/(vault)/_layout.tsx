@@ -36,6 +36,13 @@ export default function VaultTabs() {
         }}
       />
       <Tabs.Screen
+        name="camera"
+        options={{
+          title: "Camera",
+          tabBarIcon: ({ color, size }) => <Ionicons name="camera-outline" size={size} color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="browser"
         options={{
           title: "Browse",

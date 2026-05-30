@@ -5,7 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { ResizeMode, Video } from "expo-av";
 import * as ImagePicker from "expo-image-picker";
 import { useVault } from "../../src/state/VaultContext";
-import { Button, Muted, Screen, Title } from "../../src/ui/components";
+import { Button, Field, Muted, Screen, Title } from "../../src/ui/components";
 import { theme } from "../../src/ui/theme";
 import { writeTempPlaintext, deleteTemp } from "../../src/platform/expoStorage";
 import { compressImage, readFileBytes, deleteFromGallery } from "../../src/platform/media";
@@ -16,10 +16,14 @@ export default function Media() {
   const [items, setItems] = useState<VaultItem[]>([]);
   const [preview, setPreview] = useState<{ uri: string; item: VaultItem } | null>(null);
   const [importing, setImporting] = useState(false);
+  const [query, setQuery] = useState("");
 
   const refresh = useCallback(() => {
-    if (unlocked) setItems(vault.listItems().filter((i) => i.type === "media"));
-  }, [vault, unlocked]);
+    if (unlocked) {
+      const base = vault.search(query).filter((i) => i.type === "media");
+      setItems(base);
+    }
+  }, [vault, unlocked, query]);
 
   useFocusEffect(useCallback(() => refresh(), [refresh]));
 
@@ -101,6 +105,7 @@ export default function Media() {
         onPress={importMedia}
         loading={importing}
       />
+      <Field value={query} onChangeText={setQuery} placeholder="Search media…" />
       {items.length === 0 ? (
         <Muted>Nothing here yet. Imported photos and videos are encrypted and compressed.</Muted>
       ) : (
