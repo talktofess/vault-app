@@ -1,0 +1,10 @@
+node_modules/
+.expo/
+dist/
+web-build/
+*.log
+.DS_Store
+test-out.txt
+# never commit a real vault or backups
+*.vault
+vault-backup-*.json

@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "lib": ["ESNext", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-native",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "types": ["node"],
+    "paths": { "@/*": ["./*"] }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "app/**/*.tsx", "__tests__/**/*.ts"],
+  "exclude": ["node_modules"]
+}

@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "Vault",
+    "slug": "vault-app",
+    "version": "1.0.0",
+    "scheme": "vault",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0e0f13",
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "Unlock your vault with Face ID.",
+        "NSPhotoLibraryUsageDescription": "Import photos and videos into your vault."
+      }
+    },
+    "android": {
+      "permissions": ["USE_BIOMETRIC", "USE_FINGERPRINT"]
+    },
+    "plugins": ["expo-router", "expo-secure-store", "expo-local-authentication"],
+    "experiments": { "typedRoutes": false }
+  }
+}
