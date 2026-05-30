@@ -19,6 +19,12 @@ device; there is no server and no account.
   invisible. The manifest doesn't reveal which password is "real."
 - **In-app camera.** Capture a photo **straight into the vault** — it never
   touches the camera roll, so there's nothing to delete afterward.
+- **Password manager.** Encrypted credential entries (title, username, password,
+  URL, notes); copying a password auto-clears the clipboard after 30s.
+- **Intrusion log + lockout.** Failed unlock attempts are recorded; on your next
+  successful sign-in you're told how many there were and when. After 5
+  consecutive failures an exponential lockout delay applies. A duress unlock
+  leaves the log untouched so it doesn't tip off a coercer.
 - **Albums & search.** Organize items into albums and search by name.
 - **Locks instantly on exit.** The moment the app leaves the foreground, the key
   is wiped from memory — you re-unlock every time you return.

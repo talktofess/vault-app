@@ -1,6 +1,15 @@
 import type { Sealed } from "../crypto/cipher";
 
-export type ItemType = "media" | "note" | "file";
+export type ItemType = "media" | "note" | "file" | "credential";
+
+// Shape stored (as JSON, encrypted) for a credential-manager entry.
+export interface Credential {
+  title: string;
+  username: string;
+  password: string;
+  url?: string;
+  notes?: string;
+}
 
 export interface VaultItem {
   id: string;
@@ -35,6 +44,11 @@ export interface VaultManifest {
     wrappedDek: Sealed; // the DECOY dek, wrapped under the duress key
     verifier: Sealed;
   };
+  // Tamper/intrusion tracking, stored in plaintext (reveals only THAT failed
+  // unlocks happened + when — nothing about contents). Cleared on a successful
+  // real unlock; drives the failed-attempt lockout delay.
+  intrusions?: number[]; // timestamps of failed unlock attempts since last success
+  failedStreak?: number; // consecutive failures, for the lockout backoff
 }
 
 // The item index, stored ENCRYPTED under the DEK (so even names are private).

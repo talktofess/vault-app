@@ -16,6 +16,7 @@ import {
   DECOY_INDEX_ID,
   INDEX_ID,
   VERIFIER_PLAINTEXT,
+  type Credential,
   type ItemType,
   type VaultBackup,
   type VaultIndex,
@@ -34,6 +35,7 @@ export class VaultService {
   private index: VaultIndex | null = null;
   private indexId: string = INDEX_ID; // switches to the decoy index under duress
   private decoy = false; // true when unlocked via the duress password
+  private lastIntrusions: number[] = []; // failed attempts seen at last unlock
 
   constructor(
     private storage: Storage,
@@ -104,6 +106,7 @@ export class VaultService {
         this.decoy = false;
         this.indexId = INDEX_ID;
         await this.loadIndex();
+        await this.onUnlockSuccess(m, false);
         return true;
       }
     } catch {
@@ -119,6 +122,9 @@ export class VaultService {
           this.decoy = true;
           this.indexId = DECOY_INDEX_ID;
           await this.loadIndex();
+          // A duress unlock leaves the real intrusion log intact (don't tip off
+          // the coercer that attempts were logged) — just capture for display.
+          this.lastIntrusions = m.intrusions ?? [];
           return true;
         }
       } catch {
@@ -126,7 +132,50 @@ export class VaultService {
       }
     }
 
+    // total failure -> log the intrusion
+    await this.onUnlockFailure(m);
     return false;
+  }
+
+  // ---- intrusion log & lockout ----
+
+  private async onUnlockSuccess(m: VaultManifest, decoy: boolean): Promise<void> {
+    this.lastIntrusions = m.intrusions ?? [];
+    if (!decoy && (m.intrusions?.length || m.failedStreak)) {
+      const cleared: VaultManifest = { ...m, intrusions: [], failedStreak: 0 };
+      await this.storage.writeManifest(JSON.stringify(cleared));
+    }
+  }
+
+  private async onUnlockFailure(m: VaultManifest): Promise<void> {
+    const intrusions = [...(m.intrusions ?? []), nowMs()].slice(-50); // keep last 50
+    const updated: VaultManifest = {
+      ...m,
+      intrusions,
+      failedStreak: (m.failedStreak ?? 0) + 1,
+    };
+    await this.storage.writeManifest(JSON.stringify(updated));
+  }
+
+  /** Failed unlock attempts recorded since the last successful unlock. */
+  getIntrusions(): number[] {
+    return [...this.lastIntrusions];
+  }
+
+  /**
+   * Remaining lockout in ms based on consecutive failures: free for the first 4
+   * tries, then exponential backoff (5th=30s, doubling, capped at 5 min) measured
+   * from the most recent failed attempt.
+   */
+  async lockoutRemainingMs(): Promise<number> {
+    const m = await this.loadManifest().catch(() => null);
+    if (!m) return 0;
+    const streak = m.failedStreak ?? 0;
+    if (streak < 5) return 0;
+    const base = 30_000;
+    const delay = Math.min(base * 2 ** (streak - 5), 5 * 60_000);
+    const last = m.intrusions?.[m.intrusions.length - 1] ?? 0;
+    return Math.max(0, last + delay - nowMs());
   }
 
   /**
@@ -297,6 +346,36 @@ export class VaultService {
       ? this.index!.items.filter((i) => i.name.toLowerCase().includes(q))
       : [...this.index!.items];
     return items.sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  // ---- credential manager (entries are encrypted JSON of type "credential") ----
+
+  async addCredential(cred: Credential): Promise<VaultItem> {
+    const bytes = utf8ToBytes(JSON.stringify(cred));
+    return this.addItem("credential", cred.title || "Untitled", bytes);
+  }
+
+  async updateCredential(id: string, cred: Credential): Promise<void> {
+    this.requireUnlocked();
+    const item = this.index!.items.find((i) => i.id === id);
+    if (!item) throw new Error("Item not found");
+    const sealed = seal(this.dek!, utf8ToBytes(JSON.stringify(cred)));
+    await this.storage.writeBlob(id, utf8ToBytes(JSON.stringify(sealed)));
+    item.name = cred.title || "Untitled";
+    item.size = JSON.stringify(cred).length;
+    await this.persistIndex();
+  }
+
+  async readCredential(id: string): Promise<Credential> {
+    const bytes = await this.readItem(id);
+    return JSON.parse(bytesToUtf8(bytes)) as Credential;
+  }
+
+  listCredentials(): VaultItem[] {
+    this.requireUnlocked();
+    return this.index!.items
+      .filter((i) => i.type === "credential")
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
 
   // ---- password change (re-wrap DEK only) ----

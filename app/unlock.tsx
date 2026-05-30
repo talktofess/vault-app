@@ -18,10 +18,23 @@ export default function Unlock() {
   async function withPassword() {
     setBusy(true);
     try {
+      const wait = await vault.lockoutRemainingMs();
+      if (wait > 0) {
+        Alert.alert("Locked out", `Too many attempts. Try again in ${Math.ceil(wait / 1000)}s.`);
+        return;
+      }
       const ok = await vault.unlock(pw);
       if (!ok) {
         Alert.alert("Incorrect", "Wrong master password.");
         return;
+      }
+      const intr = vault.getIntrusions();
+      if (intr.length > 0) {
+        const last = new Date(intr[intr.length - 1]).toLocaleString();
+        Alert.alert(
+          "Failed attempts detected",
+          `${intr.length} failed unlock attempt${intr.length === 1 ? "" : "s"} since your last sign-in. Most recent: ${last}.`
+        );
       }
       setUnlocked(true);
       router.replace("/(vault)/media");

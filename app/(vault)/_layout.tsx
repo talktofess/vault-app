@@ -36,6 +36,13 @@ export default function VaultTabs() {
         }}
       />
       <Tabs.Screen
+        name="passwords"
+        options={{
+          title: "Keys",
+          tabBarIcon: ({ color, size }) => <Ionicons name="key-outline" size={size} color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="camera"
         options={{
           title: "Camera",

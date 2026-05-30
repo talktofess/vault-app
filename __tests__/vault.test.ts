@@ -157,3 +157,152 @@ describe("backup / restore", () => {
     await expect(dst.importVault(archive, "b", "n")).rejects.toThrow(/already exists/i);
   });
 });
+
+describe("duress / decoy password", () => {
+  it("opens a separate empty decoy vault and hides the real items", async () => {
+    const storage = new MemoryStorage();
+    const keychain = new MemoryKeychain();
+    const real = new VaultService(storage, keychain);
+    await real.create("real-pw");
+    await real.addItem("note", "TOP SECRET", utf8ToBytes("the real stuff"));
+    await real.setDuressPassword("decoy-pw");
+
+    const sneaky = new VaultService(storage, keychain);
+    expect(await sneaky.unlock("decoy-pw")).toBe(true);
+    expect(sneaky.isDecoy()).toBe(true);
+    expect(sneaky.listItems()).toEqual([]);
+
+    const owner = new VaultService(storage, keychain);
+    expect(await owner.unlock("real-pw")).toBe(true);
+    expect(owner.isDecoy()).toBe(false);
+    expect(owner.listItems().map((i) => i.name)).toEqual(["TOP SECRET"]);
+  });
+
+  it("decoy edits don't touch the real vault", async () => {
+    const storage = new MemoryStorage();
+    const keychain = new MemoryKeychain();
+    const real = new VaultService(storage, keychain);
+    await real.create("real-pw");
+    await real.addItem("note", "real-note", utf8ToBytes("x"));
+    await real.setDuressPassword("decoy-pw");
+
+    const decoy = new VaultService(storage, keychain);
+    await decoy.unlock("decoy-pw");
+    await decoy.addItem("note", "decoy-note", utf8ToBytes("planted"));
+
+    const owner = new VaultService(storage, keychain);
+    await owner.unlock("real-pw");
+    expect(owner.listItems().map((i) => i.name)).toEqual(["real-note"]);
+  });
+
+  it("refuses a duress password equal to the real one", async () => {
+    const v = svc();
+    await v.create("same");
+    await expect(v.setDuressPassword("same")).rejects.toThrow(/differ/i);
+  });
+
+  it("wrong password fails even with duress configured", async () => {
+    const v = svc();
+    await v.create("real-pw");
+    await v.setDuressPassword("decoy-pw");
+    v.lock();
+    expect(await v.unlock("neither")).toBe(false);
+  });
+});
+
+describe("albums & search", () => {
+  it("assigns albums, lists distinct albums, and searches by name", async () => {
+    const v = svc();
+    await v.create("pw");
+    await v.addItem("media", "beach.jpg", utf8ToBytes("a"), { album: "Trips" });
+    await v.addItem("media", "mountain.jpg", utf8ToBytes("b"), { album: "Trips" });
+    await v.addItem("note", "recipe", utf8ToBytes("c"), { album: "Food" });
+
+    expect(v.albums()).toEqual(["Food", "Trips"]);
+    expect(v.search("beach").map((i) => i.name)).toEqual(["beach.jpg"]);
+    expect(v.search("").length).toBe(3);
+    expect(v.search("ZZZ")).toEqual([]);
+  });
+
+  it("renames and re-albums an item", async () => {
+    const v = svc();
+    await v.create("pw");
+    const it = await v.addItem("file", "old.bin", utf8ToBytes("x"));
+    await v.updateItemMeta(it.id, { name: "new.bin", album: "Docs" });
+    const got = v.listItems()[0];
+    expect(got.name).toBe("new.bin");
+    expect(got.album).toBe("Docs");
+    await v.updateItemMeta(it.id, { album: "" });
+    expect(v.listItems()[0].album).toBeUndefined();
+  });
+});
+
+describe("credential manager", () => {
+  it("adds, reads, updates, and lists credentials", async () => {
+    const v = svc();
+    await v.create("pw");
+    const c = await v.addCredential({
+      title: "Email",
+      username: "me@x.com",
+      password: "s3cr3t",
+      url: "mail.x.com",
+    });
+    const read = await v.readCredential(c.id);
+    expect(read.username).toBe("me@x.com");
+    expect(read.password).toBe("s3cr3t");
+
+    await v.updateCredential(c.id, { ...read, password: "rotated", title: "Email (work)" });
+    const again = await v.readCredential(c.id);
+    expect(again.password).toBe("rotated");
+    expect(v.listCredentials()[0].name).toBe("Email (work)");
+  });
+
+  it("credentials don't appear in the media/file lists", async () => {
+    const v = svc();
+    await v.create("pw");
+    await v.addCredential({ title: "c", username: "u", password: "p" });
+    await v.addItem("media", "m.jpg", utf8ToBytes("x"));
+    expect(v.listCredentials().length).toBe(1);
+    expect(v.listItems().filter((i) => i.type === "media").length).toBe(1);
+  });
+});
+
+describe("intrusion log & lockout", () => {
+  it("records failed attempts and surfaces them after a successful unlock", async () => {
+    const storage = new MemoryStorage();
+    const keychain = new MemoryKeychain();
+    const a = new VaultService(storage, keychain);
+    await a.create("right-pw");
+    a.lock();
+
+    const b = new VaultService(storage, keychain);
+    expect(await b.unlock("wrong1")).toBe(false);
+    expect(await b.unlock("wrong2")).toBe(false);
+    expect(await b.unlock("right-pw")).toBe(true);
+    expect(b.getIntrusions().length).toBe(2);
+
+    const c = new VaultService(storage, keychain);
+    expect(await c.unlock("right-pw")).toBe(true);
+    expect(c.getIntrusions().length).toBe(0);
+  });
+
+  it("imposes a lockout delay after 5 consecutive failures", async () => {
+    const v = svc();
+    await v.create("pw");
+    v.lock();
+    expect(await v.lockoutRemainingMs()).toBe(0);
+    for (let i = 0; i < 5; i++) await v.unlock("nope");
+    expect(await v.lockoutRemainingMs()).toBeGreaterThan(0);
+  });
+
+  it("a successful unlock resets the lockout", async () => {
+    const v = svc();
+    await v.create("pw");
+    v.lock();
+    for (let i = 0; i < 6; i++) await v.unlock("nope");
+    expect(await v.lockoutRemainingMs()).toBeGreaterThan(0);
+    await v.unlock("pw");
+    v.lock();
+    expect(await v.lockoutRemainingMs()).toBe(0);
+  });
+});
