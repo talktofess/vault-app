@@ -2,7 +2,7 @@
   "expo": {
     "name": "Offline Chess",
     "slug": "vault-app",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "scheme": "vault",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
@@ -27,7 +27,7 @@
     },
     "android": {
       "package": "com.talktofess.vault",
-      "versionCode": 1,
+      "versionCode": 2,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0e0f13"

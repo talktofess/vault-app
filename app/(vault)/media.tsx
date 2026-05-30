@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { Alert, FlatList, Image, Modal, Pressable, Text, View } from "react-native";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { ResizeMode, Video } from "expo-av";
 import * as ImagePicker from "expo-image-picker";
 import { useVault } from "../../src/state/VaultContext";
 import { Button, Muted, Screen, Title } from "../../src/ui/components";
@@ -142,9 +143,13 @@ export default function Media() {
             <Image source={{ uri: preview.uri }} style={{ flex: 1 }} resizeMode="contain" />
           )}
           {preview && preview.item.mime?.includes("video") && (
-            <View style={{ padding: 20 }}>
-              <Muted>Video decrypted to a temporary file (wiped on close). Inline playback needs expo-av.</Muted>
-            </View>
+            <Video
+              source={{ uri: preview.uri }}
+              style={{ flex: 1 }}
+              useNativeControls
+              resizeMode={ResizeMode.CONTAIN}
+              shouldPlay
+            />
           )}
           <View style={{ padding: 20 }}>
             <Button label="Close" onPress={closePreview} variant="outline" />

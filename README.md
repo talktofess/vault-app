@@ -151,7 +151,7 @@ __tests__/     crypto + vault suites
 ```
 
 ## Notes / next steps
-- Inline video playback needs `expo-av` (the viewer currently decrypts the video
-  to a temp file and notes this); images play inline already.
+- Inline video playback works (`expo-av`): the encrypted video is decrypted to a
+  temp file, played in-app with native controls, and the temp is wiped on close.
 - The file-backed backup import is stubbed in the UI (the core `importVault` is
   implemented and tested) — wiring the picker → `importVault` is the next step.
