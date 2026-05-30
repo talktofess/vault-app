@@ -10,12 +10,15 @@
     "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.talktofess.vault",
       "infoPlist": {
         "NSFaceIDUsageDescription": "Unlock your vault with Face ID.",
         "NSPhotoLibraryUsageDescription": "Import photos and videos into your vault."
       }
     },
     "android": {
+      "package": "com.talktofess.vault",
+      "versionCode": 1,
       "permissions": ["USE_BIOMETRIC", "USE_FINGERPRINT"]
     },
     "plugins": ["expo-router", "expo-secure-store", "expo-local-authentication"],

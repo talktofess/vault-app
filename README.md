@@ -20,6 +20,33 @@ in the terminal. The app opens on your phone.
 > First launch → set a master password. After that, unlock with the password or
 > (once enabled in Settings) Face ID / fingerprint.
 
+> Note: `npx expo start` runs the app *through your computer* (it's the dev
+> server). Great for trying it out; for permanent, untethered use build a
+> standalone app — see below.
+
+## Install permanently (standalone Android APK)
+Builds run in Expo's cloud (EAS) and need a **free Expo account**. The build
+config is already set up (`eas.json`, Android package `com.talktofess.vault`).
+
+```bash
+npm install -g eas-cli      # one-time
+eas login                   # sign in / create a free account
+eas init                    # links this project to your account (adds a projectId)
+eas build --platform android --profile preview
+```
+When it finishes (~10–15 min) the terminal prints a URL to **download the APK**.
+Open that link on your Android phone and install it (you'll allow "install from
+unknown sources" once). The app then lives on your phone with no computer needed.
+
+- **`preview`** profile → a directly-installable **APK** (sideload). Best for
+  personal use.
+- **`production`** profile → also an APK here, with auto-incrementing version.
+- iOS standalone needs an Apple Developer account (`eas build --platform ios`);
+  Android APK has no such requirement.
+
+> The vault's data never leaves the device regardless of how it's installed —
+> EAS only builds the app binary, not your vault contents.
+
 ## What it stores
 - **Media** — import photos/videos from your library, browse an encrypted
   gallery, view in-app (decrypted to a temp file that's wiped on close).
