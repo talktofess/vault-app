@@ -147,7 +147,7 @@ export class VaultService {
     type: ItemType,
     name: string,
     data: Uint8Array,
-    opts: { mime?: string; isJson?: boolean; createdAt?: number } = {}
+    opts: { mime?: string; isJson?: boolean; createdAt?: number; sourceUrl?: string } = {}
   ): Promise<VaultItem> {
     this.requireUnlocked();
     const item: VaultItem = {
@@ -157,6 +157,7 @@ export class VaultService {
       size: data.length,
       mime: opts.mime,
       isJson: opts.isJson,
+      sourceUrl: opts.sourceUrl,
       createdAt: opts.createdAt ?? nowMs(),
     };
     const sealed = seal(this.dek!, data);

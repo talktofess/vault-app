@@ -1,19 +1,20 @@
 import { useCallback, useState } from "react";
 import { Alert, FlatList, Image, Modal, Pressable, Text, View } from "react-native";
 import { useFocusEffect } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
-import * as FileSystem from "expo-file-system";
 import { useVault } from "../../src/state/VaultContext";
 import { Button, Muted, Screen, Title } from "../../src/ui/components";
 import { theme } from "../../src/ui/theme";
-import { fromB64, toB64 } from "../../src/crypto/b64";
 import { writeTempPlaintext, deleteTemp } from "../../src/platform/expoStorage";
+import { compressImage, readFileBytes, deleteFromGallery } from "../../src/platform/media";
 import type { VaultItem } from "../../src/vault/types";
 
 export default function Media() {
   const { vault, unlocked } = useVault();
   const [items, setItems] = useState<VaultItem[]>([]);
   const [preview, setPreview] = useState<{ uri: string; item: VaultItem } | null>(null);
+  const [importing, setImporting] = useState(false);
 
   const refresh = useCallback(() => {
     if (unlocked) setItems(vault.listItems().filter((i) => i.type === "media"));
@@ -25,18 +26,44 @@ export default function Media() {
     const res = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.All,
       quality: 1,
-      base64: false,
+      allowsMultipleSelection: true,
     });
     if (res.canceled) return;
-    for (const asset of res.assets) {
-      const b64 = await FileSystem.readAsStringAsync(asset.uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      const name = asset.fileName ?? `media_${Date.now()}`;
-      const mime = asset.mimeType ?? (asset.type === "video" ? "video/mp4" : "image/jpeg");
-      await vault.addItem("media", name, fromB64(b64), { mime });
+    setImporting(true);
+    const importedAssetIds: string[] = [];
+    try {
+      for (const asset of res.assets) {
+        const isVideo = asset.type === "video";
+        // Images are compressed to save space; video is stored as-is (Expo
+        // can't transcode video).
+        const bytes = isVideo ? await readFileBytes(asset.uri) : await compressImage(asset.uri);
+        const name = asset.fileName ?? `media_${Date.now()}`;
+        const mime = isVideo ? asset.mimeType ?? "video/mp4" : "image/jpeg";
+        await vault.addItem("media", name, bytes, { mime });
+        if (asset.assetId) importedAssetIds.push(asset.assetId);
+      }
+      refresh();
+      // Offer to remove the originals from the device gallery (OS will show its
+      // own confirmation — no app can delete photos silently).
+      if (importedAssetIds.length > 0) {
+        Alert.alert(
+          "Remove originals?",
+          "Delete the imported items from your device gallery? They're safely stored here.",
+          [
+            { text: "Keep", style: "cancel" },
+            {
+              text: "Delete from gallery",
+              style: "destructive",
+              onPress: () => deleteFromGallery(importedAssetIds),
+            },
+          ]
+        );
+      }
+    } catch (e) {
+      Alert.alert("Import failed", e instanceof Error ? e.message : "Could not import.");
+    } finally {
+      setImporting(false);
     }
-    refresh();
   }
 
   async function openItem(item: VaultItem) {
@@ -47,11 +74,11 @@ export default function Media() {
   }
 
   async function closePreview() {
-    if (preview) await deleteTemp(preview.uri); // wipe decrypted temp
+    if (preview) await deleteTemp(preview.uri);
     setPreview(null);
   }
 
-  async function remove(item: VaultItem) {
+  function remove(item: VaultItem) {
     Alert.alert("Delete", `Delete "${item.name}"?`, [
       { text: "Cancel", style: "cancel" },
       {
@@ -68,9 +95,13 @@ export default function Media() {
   return (
     <Screen>
       <Title>Media</Title>
-      <Button label="+ Import photo / video" onPress={importMedia} />
+      <Button
+        label={importing ? "Importing…" : "Import photo / video"}
+        onPress={importMedia}
+        loading={importing}
+      />
       {items.length === 0 ? (
-        <Muted>No media yet. Import encrypted photos and videos from your library.</Muted>
+        <Muted>Nothing here yet. Imported photos and videos are encrypted and compressed.</Muted>
       ) : (
         <FlatList
           data={items}
@@ -89,12 +120,15 @@ export default function Media() {
                 borderRadius: 10,
                 alignItems: "center",
                 justifyContent: "center",
+                gap: 4,
               }}
             >
-              <Text style={{ fontSize: 28 }}>
-                {item.mime?.includes("video") ? "🎬" : "🖼️"}
-              </Text>
-              <Text numberOfLines={1} style={{ color: theme.muted, fontSize: 10, padding: 4 }}>
+              <Ionicons
+                name={item.mime?.includes("video") ? "videocam" : "image"}
+                size={30}
+                color={theme.accent}
+              />
+              <Text numberOfLines={1} style={{ color: theme.muted, fontSize: 10, paddingHorizontal: 4 }}>
                 {item.name}
               </Text>
             </Pressable>
@@ -109,10 +143,7 @@ export default function Media() {
           )}
           {preview && preview.item.mime?.includes("video") && (
             <View style={{ padding: 20 }}>
-              <Muted>
-                Video decrypted to a temporary file. (Add expo-av to play inline;
-                file is wiped on close.)
-              </Muted>
+              <Muted>Video decrypted to a temporary file (wiped on close). Inline playback needs expo-av.</Muted>
             </View>
           )}
           <View style={{ padding: 20 }}>

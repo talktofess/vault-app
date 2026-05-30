@@ -11,6 +11,8 @@ export interface VaultItem {
   createdAt: number;
   // For notes we may store a flag that the content is JSON (for the editor).
   isJson?: boolean;
+  // Origin URL for files downloaded via the in-app browser.
+  sourceUrl?: string;
 }
 
 // Plaintext metadata, readable BEFORE unlock. Reveals nothing about content —

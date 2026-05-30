@@ -1,12 +1,18 @@
 {
   "expo": {
-    "name": "Vault",
+    "name": "Offline Chess",
     "slug": "vault-app",
     "version": "1.0.0",
     "scheme": "vault",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0e0f13",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0e0f13"
+    },
     "assetBundlePatterns": [
       "**/*"
     ],
@@ -14,13 +20,18 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.talktofess.vault",
       "infoPlist": {
-        "NSFaceIDUsageDescription": "Unlock your vault with Face ID.",
-        "NSPhotoLibraryUsageDescription": "Import photos and videos into your vault."
+        "NSFaceIDUsageDescription": "Unlock to continue.",
+        "NSPhotoLibraryUsageDescription": "Import photos and videos.",
+        "NSPhotoLibraryAddUsageDescription": "Manage imported media."
       }
     },
     "android": {
       "package": "com.talktofess.vault",
       "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0e0f13"
+      },
       "permissions": [
         "USE_BIOMETRIC",
         "USE_FINGERPRINT",
@@ -31,7 +42,15 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      "expo-local-authentication"
+      "expo-local-authentication",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Import photos and videos.",
+          "savePhotosPermission": "Manage imported media.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ]
     ],
     "runtimeVersion": {
       "policy": "appVersion"

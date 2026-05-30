@@ -1,4 +1,5 @@
 import { Tabs } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { theme } from "../../src/ui/theme";
 
 export default function VaultTabs() {
@@ -13,10 +14,41 @@ export default function VaultTabs() {
         tabBarInactiveTintColor: theme.muted,
       }}
     >
-      <Tabs.Screen name="media" options={{ title: "Media" }} />
-      <Tabs.Screen name="notes" options={{ title: "Notes" }} />
-      <Tabs.Screen name="files" options={{ title: "Files" }} />
-      <Tabs.Screen name="settings" options={{ title: "Settings" }} />
+      <Tabs.Screen
+        name="media"
+        options={{
+          title: "Media",
+          tabBarIcon: ({ color, size }) => <Ionicons name="images-outline" size={size} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="notes"
+        options={{
+          title: "Notes",
+          tabBarIcon: ({ color, size }) => <Ionicons name="document-text-outline" size={size} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="files"
+        options={{
+          title: "Files",
+          tabBarIcon: ({ color, size }) => <Ionicons name="folder-outline" size={size} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="browser"
+        options={{
+          title: "Browse",
+          tabBarIcon: ({ color, size }) => <Ionicons name="globe-outline" size={size} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: "Settings",
+          tabBarIcon: ({ color, size }) => <Ionicons name="settings-outline" size={size} color={color} />,
+        }}
+      />
     </Tabs>
   );
 }

@@ -1,9 +1,31 @@
-# Vault
+# Offline Chess
+
+> Display name is intentionally innocuous ("Offline Chess", chessboard icon) —
+> the app's true purpose isn't advertised on your home screen.
 
 A personal, offline, on-device encrypted vault for your phone. Store photos,
 videos, secure notes / JSON, and any files — all **AES-256-GCM encrypted at
 rest**, unlocked by a master password or biometrics. Everything stays on your
 device; there is no server and no account.
+
+## What's inside
+- **Locks instantly on exit.** The moment the app leaves the foreground, the key
+  is wiped from memory — you re-unlock every time you return.
+- **Hidden storage.** Data lives in the app's private sandbox in a nondescript
+  `.gamedata` folder with a `.nomedia` marker, so nothing ever shows in the
+  gallery, file managers, or media scanners. Filenames on disk are random; the
+  index (with real names) is itself encrypted.
+- **Media** — import photos/videos; **images are compressed** before encrypting
+  to save space (video stored as-is — Expo can't transcode). On import you're
+  offered to **delete the originals from your gallery** (the OS shows its own
+  confirmation; no app can delete your photos silently).
+- **In-app browser** — search/stream/watch inline, and tap **download** to pull
+  any file straight into the encrypted vault. Browsing history is never
+  persisted; it's gone the moment the app locks.
+- **Notes / JSON, Files** (import + export via share sheet), **encrypted backup
+  & restore**.
+- **Icons** throughout via Ionicons; chessboard app icon generated in
+  `tools/make-icon.js`.
 
 Built with **Expo (React Native)** so it runs on your own iPhone or Android via
 the free **Expo Go** app — no app store, no Apple developer account.

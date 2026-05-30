@@ -5,12 +5,21 @@ import * as FileSystem from "expo-file-system";
 import { fromB64, toB64 } from "../crypto/b64";
 import type { Storage } from "../vault/ports";
 
-const ROOT = FileSystem.documentDirectory + "vault/";
+// A nondescript folder name (not "vault") inside the app's private sandbox.
+// documentDirectory is already invisible to the gallery / other apps and to
+// MediaStore; the .nomedia marker additionally tells Android's media scanner to
+// skip it, so nothing here ever surfaces in galleries or file pickers.
+const ROOT = FileSystem.documentDirectory + ".gamedata/";
 const MANIFEST = ROOT + "manifest.json";
 const BLOBS = ROOT + "blobs/";
+const NOMEDIA = ROOT + ".nomedia";
 
 async function ensureDirs(): Promise<void> {
   await FileSystem.makeDirectoryAsync(BLOBS, { intermediates: true }).catch(() => {});
+  // mark the folder as non-media so Android's scanner ignores it
+  await FileSystem.getInfoAsync(NOMEDIA).then((i) =>
+    i.exists ? null : FileSystem.writeAsStringAsync(NOMEDIA, "")
+  ).catch(() => {});
 }
 
 export class ExpoStorage implements Storage {
