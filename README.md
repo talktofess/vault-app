@@ -44,6 +44,26 @@ unknown sources" once). The app then lives on your phone with no computer needed
 - iOS standalone needs an Apple Developer account (`eas build --platform ios`);
   Android APK has no such requirement.
 
+## Pushing changes to an installed app (over-the-air updates)
+This project is wired for **EAS Update** (`expo-updates` is installed; `app.json`
+has the `updates` URL + an `appVersion` runtime policy). That means most changes
+reach an installed app **without a reinstall**.
+
+**One-time:** the APK must be built *after* this was added — so rebuild once
+(`eas build --platform android --profile preview`) and reinstall. That APK is now
+update-capable.
+
+**After that, for JS/UI changes** (screens, logic, styling, bug fixes):
+```bash
+eas update --branch preview --message "what changed"
+```
+The installed app fetches it on next launch — no rebuild, no reinstall.
+
+**Still needs a full rebuild + reinstall** when you change native code: add a
+native library (e.g. `expo-av` for inline video), change permissions, the app
+icon, or the Expo SDK. Bump the app `version` when you do, so the runtime version
+matches.
+
 > The vault's data never leaves the device regardless of how it's installed —
 > EAS only builds the app binary, not your vault contents.
 
