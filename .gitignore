@@ -8,3 +8,5 @@ test-out.txt
 # never commit a real vault or backups
 *.vault
 vault-backup-*.json
+
+.vercel

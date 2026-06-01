@@ -14,7 +14,7 @@ export default function Index() {
       const exists = await vault.exists();
       if (!active) return;
       if (!exists) router.replace("/onboarding");
-      else if (unlocked) router.replace("/(vault)/media");
+      else if (unlocked) router.replace("/(vault)/library");
       // When locked, show the chess disguise — not the unlock screen. The
       // secret tap sequence on the board leads to /unlock.
       else router.replace("/chess");

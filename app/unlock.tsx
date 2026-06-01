@@ -46,7 +46,7 @@ export default function Unlock() {
         );
       }
       setUnlocked(true);
-      router.replace("/(vault)/media");
+      router.replace("/(vault)/library");
     } finally {
       setBusy(false);
     }
@@ -57,7 +57,7 @@ export default function Unlock() {
     if (!ok) return;
     if (await vault.unlockWithBiometric()) {
       setUnlocked(true);
-      router.replace("/(vault)/media");
+      router.replace("/(vault)/library");
     }
   }
 

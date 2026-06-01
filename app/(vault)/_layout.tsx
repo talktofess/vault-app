@@ -18,26 +18,18 @@ export default function VaultTabs() {
       }}
     >
       <Tabs.Screen
-        name="media"
+        name="library"
         options={{
-          title: "Media",
-          tabBarIcon: ({ color, size }) => <Ionicons name="images-outline" size={size} color={color} />,
+          title: "Vault",
+          tabBarIcon: ({ color, size }) => <Ionicons name="albums-outline" size={size} color={color} />,
         }}
       />
-      <Tabs.Screen
-        name="notes"
-        options={{
-          title: "Notes",
-          tabBarIcon: ({ color, size }) => <Ionicons name="document-text-outline" size={size} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="files"
-        options={{
-          title: "Files",
-          tabBarIcon: ({ color, size }) => <Ionicons name="folder-outline" size={size} color={color} />,
-        }}
-      />
+      {/* media / notes / files are now unified into the Library ("Vault") tab.
+          The routes stay registered (deep links / in-app navigation still work)
+          but are hidden from the tab bar to keep one place for everything. */}
+      <Tabs.Screen name="media" options={{ href: null, title: "Media" }} />
+      <Tabs.Screen name="notes" options={{ href: null, title: "Notes" }} />
+      <Tabs.Screen name="files" options={{ href: null, title: "Files" }} />
       <Tabs.Screen
         name="passwords"
         options={{
