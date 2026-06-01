@@ -160,6 +160,8 @@ const styles = StyleSheet.create({
     borderRadius: 38,
     alignItems: "center",
     justifyContent: "center",
+    borderWidth: 1,
+    borderColor: theme.border,
   },
   keyText: { color: theme.text, fontSize: 30, fontWeight: "600" },
   modalBg: {

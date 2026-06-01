@@ -425,11 +425,30 @@ export default function Library() {
       </View>
 
       {visible.length === 0 ? (
-        <Muted>
-          {items.length === 0
-            ? "Your vault is empty. Tap “Add to vault” to import photos, videos, documents, APKs — anything."
-            : "Nothing matches this filter/search."}
-        </Muted>
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 14, paddingBottom: 60 }}>
+          <View
+            style={{
+              width: 88,
+              height: 88,
+              borderRadius: 44,
+              backgroundColor: theme.surface,
+              borderWidth: 1,
+              borderColor: theme.border,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Ionicons name={items.length === 0 ? "lock-closed-outline" : "search-outline"} size={38} color={theme.accent} />
+          </View>
+          <Text style={{ color: theme.text, fontSize: 17, fontWeight: "700" }}>
+            {items.length === 0 ? "Your vault is empty" : "Nothing here"}
+          </Text>
+          <Text style={{ color: theme.muted, fontSize: 14, lineHeight: 21, textAlign: "center", paddingHorizontal: 30 }}>
+            {items.length === 0
+              ? "Tap “Add to vault” to bring in photos, videos, documents, APKs — anything. It’s all encrypted."
+              : "No items match this filter or search."}
+          </Text>
+        </View>
       ) : (
         <FlatList
           data={visible}
@@ -446,20 +465,23 @@ export default function Library() {
                 style={{
                   flexDirection: "row",
                   alignItems: "center",
-                  gap: 12,
+                  gap: 13,
                   backgroundColor: isSel ? theme.surfaceAlt : theme.surface,
                   borderRadius: theme.radius,
                   borderWidth: 1,
                   borderColor: isSel ? theme.accent : theme.border,
-                  padding: 12,
+                  borderLeftWidth: 3,
+                  borderLeftColor: CATEGORY_COLOR[cat],
+                  paddingVertical: 12,
+                  paddingHorizontal: 14,
                 }}
               >
                 <View
                   style={{
-                    width: 44,
-                    height: 44,
-                    borderRadius: 10,
-                    backgroundColor: theme.bg,
+                    width: 46,
+                    height: 46,
+                    borderRadius: 12,
+                    backgroundColor: CATEGORY_COLOR[cat] + "22",
                     alignItems: "center",
                     justifyContent: "center",
                   }}

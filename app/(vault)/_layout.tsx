@@ -11,8 +11,16 @@ export default function VaultTabs() {
       screenOptions={{
         headerStyle: { backgroundColor: theme.bg },
         headerTintColor: theme.text,
+        headerTitleStyle: { fontWeight: "800", letterSpacing: -0.3 },
         headerShadowVisible: false,
-        tabBarStyle: { backgroundColor: theme.surface, borderTopColor: theme.border },
+        tabBarStyle: {
+          backgroundColor: theme.bgElevated,
+          borderTopColor: theme.border,
+          height: 64,
+          paddingTop: 8,
+          paddingBottom: 10,
+        },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
         tabBarActiveTintColor: theme.accent,
         tabBarInactiveTintColor: theme.muted,
       }}
@@ -52,10 +60,11 @@ export default function VaultTabs() {
       <Tabs.Screen
         name="browser"
         options={{
-          title: isWeb ? "Download" : "Browse",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name={isWeb ? "download-outline" : "globe-outline"} size={size} color={color} />
-          ),
+          title: "Browse",
+          // Downloading is phone-only; hide this tab on web (route still resolves
+          // to the web stub so the native WebView screen isn't bundled there).
+          href: isWeb ? null : undefined,
+          tabBarIcon: ({ color, size }) => <Ionicons name="globe-outline" size={size} color={color} />,
         }}
       />
       <Tabs.Screen
