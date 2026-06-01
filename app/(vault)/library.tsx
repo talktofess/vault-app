@@ -118,7 +118,8 @@ export default function Library() {
     const assetIds: string[] = [];
     try {
       for (const asset of res.assets) {
-        const isVideo = asset.type === "video";
+        // asset.type can be undefined on web — fall back to the mime type.
+        const isVideo = asset.type === "video" || (asset.mimeType?.startsWith("video") ?? false);
         const bytes = isVideo ? await readFileBytes(asset.uri) : await compressImage(asset.uri);
         const name = asset.fileName ?? `media_${Date.now()}`;
         const mime = isVideo ? asset.mimeType ?? "video/mp4" : "image/jpeg";
