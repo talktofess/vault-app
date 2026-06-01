@@ -28,6 +28,7 @@ import { compressImage, readFileBytes, deleteFromGallery } from "../../src/platf
 import { readBytesFromUri } from "../../src/platform/io";
 import { streamRemoteToUri } from "../../src/platform/streamMedia";
 import { syncIfLinked } from "../../src/cloud/autosync";
+import { folderImportSupported, pickFolder } from "../../src/platform/folderPicker";
 import { bytesToUtf8, utf8ToBytes } from "../../src/crypto/b64";
 import {
   CATEGORY_COLOR,
@@ -161,6 +162,34 @@ export default function Library() {
       void runSync(true);
     } catch (e) {
       Alert.alert("Import failed", e instanceof Error ? e.message : "Could not import.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function importFolder() {
+    setImportMenu(false);
+    let files;
+    try {
+      files = await pickFolder();
+    } catch (e) {
+      Alert.alert("Import failed", e instanceof Error ? e.message : "Could not read the folder.");
+      return;
+    }
+    if (!files.length) return;
+    setBusy(`Importing ${files.length} file${files.length === 1 ? "" : "s"}…`);
+    try {
+      for (const f of files) {
+        const m = f.mime ?? "";
+        const type = m.startsWith("image") || m.startsWith("video") ? "media" : "file";
+        // preserve the folder layout: subfolders become the album
+        const dir = f.relPath.split("/").slice(0, -1).join(" / ");
+        await vault.addItem(type, f.name, f.bytes, { mime: f.mime, album: dir || undefined });
+      }
+      refresh();
+      void runSync(true);
+    } catch (e) {
+      Alert.alert("Import failed", e instanceof Error ? e.message : "Could not import the folder.");
     } finally {
       setBusy(null);
     }
@@ -555,8 +584,11 @@ export default function Library() {
 
       {/* import menu */}
       <Sheet visible={importMenu} onClose={() => setImportMenu(false)} title="Add to vault">
-        <SheetRow icon="images-outline" label="Photo / video" sub="From your gallery (images are compressed)" onPress={importPhotos} />
-        <SheetRow icon="document-outline" label="Any file" sub="Documents, APKs, archives — any format" onPress={importFiles} />
+        <SheetRow icon="images-outline" label="Photos / videos" sub="Pick one or many; images are compressed" onPress={importPhotos} />
+        <SheetRow icon="document-outline" label="Any file(s)" sub="Pick one or many — documents, APKs, archives, any format" onPress={importFiles} />
+        {folderImportSupported && (
+          <SheetRow icon="folder-outline" label="Whole folder" sub="Imports every file (and subfolders) — kept as albums" onPress={importFolder} />
+        )}
         <SheetRow icon="camera-outline" label="Camera" sub="Capture straight into the vault" onPress={goCamera} />
         <SheetRow icon="create-outline" label="New note" sub="Encrypted text or JSON" onPress={newNote} />
       </Sheet>

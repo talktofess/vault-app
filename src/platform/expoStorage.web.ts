@@ -28,10 +28,19 @@ function tx<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore) => IDBReque
   return openDb().then(
     (db) =>
       new Promise<T>((resolve, reject) => {
-        const store = db.transaction(STORE, mode).objectStore(STORE);
-        const req = fn(store);
-        req.onsuccess = () => resolve(req.result);
+        const transaction = db.transaction(STORE, mode);
+        const req = fn(transaction.objectStore(STORE));
+        let result: T;
+        req.onsuccess = () => {
+          result = req.result;
+        };
         req.onerror = () => reject(req.error ?? new Error("IndexedDB request failed"));
+        // Resolve on COMMIT, not just request success — otherwise a write can be
+        // reported done before it's durably saved, and a quick page refresh loses
+        // it (the "item vanishes after reload" bug).
+        transaction.oncomplete = () => resolve(result);
+        transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed"));
+        transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction aborted"));
       })
   );
 }

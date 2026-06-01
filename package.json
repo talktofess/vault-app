@@ -47,6 +47,7 @@
   },
   "devDependencies": {
     "@types/react": "~18.2.79",
+    "fake-indexeddb": "^6.2.5",
     "pg": "^8.21.0",
     "typescript": "~5.3.3",
     "vitest": "^2.1.0"
