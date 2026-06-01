@@ -1,31 +1,52 @@
-import { useState } from "react";
-import { Alert } from "react-native";
+import { useEffect, useState } from "react";
+import { Alert, View } from "react-native";
 import { router } from "expo-router";
 import { useVault } from "../src/state/VaultContext";
-import { Button, Field, Muted, Screen, Title } from "../src/ui/components";
+import { Muted, Screen, Title } from "../src/ui/components";
+import { PIN_LENGTH, PinPad } from "../src/ui/PinPad";
 
+// Two-step PIN setup: enter a 4-digit PIN, then confirm it. The PIN is just the
+// "password" the vault crypto derives a key from — short by design, but the
+// vault still locks instantly on exit and rate-limits guesses after 5 failures.
 export default function Onboarding() {
   const { vault, setUnlocked } = useVault();
-  const [pw, setPw] = useState("");
-  const [confirm, setConfirm] = useState("");
+  const [stage, setStage] = useState<"set" | "confirm">("set");
+  const [first, setFirst] = useState("");
+  const [pin, setPin] = useState("");
   const [busy, setBusy] = useState(false);
 
-  async function create() {
-    if (pw.length < 8) {
-      Alert.alert("Weak password", "Use at least 8 characters.");
+  // Advance / submit automatically once 4 digits are entered.
+  useEffect(() => {
+    if (pin.length !== PIN_LENGTH || busy) return;
+    if (stage === "set") {
+      setFirst(pin);
+      setPin("");
+      setStage("confirm");
       return;
     }
-    if (pw !== confirm) {
-      Alert.alert("Mismatch", "The passwords don't match.");
+    // stage === "confirm"
+    if (pin !== first) {
+      Alert.alert("PINs don't match", "Let's try again.");
+      setFirst("");
+      setPin("");
+      setStage("set");
       return;
     }
+    create(pin);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pin]);
+
+  async function create(value: string) {
     setBusy(true);
     try {
-      await vault.create(pw);
+      await vault.create(value);
       setUnlocked(true);
       router.replace("/(vault)/media");
     } catch (e) {
       Alert.alert("Error", e instanceof Error ? e.message : "Could not create vault");
+      setFirst("");
+      setPin("");
+      setStage("set");
     } finally {
       setBusy(false);
     }
@@ -33,15 +54,15 @@ export default function Onboarding() {
 
   return (
     <Screen>
-      <Title>Set a master password</Title>
+      <Title>{stage === "set" ? "Choose a 4-digit PIN" : "Confirm your PIN"}</Title>
       <Muted>
-        This password encrypts everything in your vault. There is no recovery if
-        you forget it — only your encrypted backup can restore the vault. Choose
-        something strong and memorable.
+        {stage === "set"
+          ? "This PIN unlocks your vault. There's no recovery if you forget it — keep an encrypted backup as your safety net."
+          : "Enter the same 4 digits again to confirm."}
       </Muted>
-      <Field value={pw} onChangeText={setPw} placeholder="Master password" secureTextEntry autoFocus />
-      <Field value={confirm} onChangeText={setConfirm} placeholder="Confirm password" secureTextEntry />
-      <Button label="Create vault" onPress={create} loading={busy} />
+      <View style={{ flex: 1, justifyContent: "center" }}>
+        <PinPad pin={pin} onChange={setPin} disabled={busy} />
+      </View>
     </Screen>
   );
 }

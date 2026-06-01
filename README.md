@@ -5,18 +5,19 @@
 
 A personal, offline, on-device encrypted vault for your phone. Store photos,
 videos, secure notes / JSON, and any files — all **AES-256-GCM encrypted at
-rest**, unlocked by a master password or biometrics. Everything stays on your
-device; there is no server and no account.
+rest**, unlocked by a **4-digit PIN** (entered on a custom in-app keypad, so the
+system keyboard's autofill/autocorrect can never garble it) or biometrics.
+Everything stays on your device; there is no server and no account.
 
 ## What's inside
 - **Chess disguise.** When locked, the app opens to a **real, playable chess
   board** ("Offline Chess"). A secret sequence of corner taps (a1 → h8 → h1 → a8)
   reveals the unlock screen. Any wrong tap silently resets — there's no hint the
   door exists.
-- **Decoy (duress) password.** Set a second password that unlocks a separate,
-  **empty** vault. If you're ever forced to open the app, give that one — your
-  real items stay encrypted under a key the decoy password can't derive, and are
-  invisible. The manifest doesn't reveal which password is "real."
+- **Decoy (duress) PIN.** Set a second PIN that unlocks a separate, **empty**
+  vault. If you're ever forced to open the app, give that one — your real items
+  stay encrypted under a key the decoy PIN can't derive, and are invisible. The
+  manifest doesn't reveal which PIN is "real."
 - **In-app camera.** Capture a photo **straight into the vault** — it never
   touches the camera roll, so there's nothing to delete afterward.
 - **Password manager.** Encrypted credential entries (title, username, password,
@@ -36,9 +37,18 @@ device; there is no server and no account.
   to save space (video stored as-is — Expo can't transcode). On import you're
   offered to **delete the originals from your gallery** (the OS shows its own
   confirmation; no app can delete your photos silently).
-- **In-app browser** — search/stream/watch inline, and tap **download** to pull
-  any file straight into the encrypted vault. Browsing history is never
-  persisted; it's gone the moment the app locks.
+- **In-app browser (fully in-house).** Search/stream/watch inline. The WebView
+  runs **incognito** — no history, cookies, or cache persist, third-party and
+  shared cookies are off, and no URL is ever handed to an external app
+  (`intent://`, `market://`, `mailto:`…), so nothing leaks into Chrome or any
+  other app even as you hop between sites. Browsing state is gone the moment the
+  app locks.
+- **Video grabber.** On pages with fetchable videos, a **film button** appears
+  with a count of detected sources. Pick a source and, for adaptive (`.m3u8`)
+  streams, choose a **resolution (144p/240p/360p/720p…)**; the download runs in
+  the **background** (you keep watching/browsing) and lands **encrypted in the
+  vault's hidden folder — never the gallery**. Honest limits: DRM/MediaSource
+  sites (YouTube, Netflix, `blob:` streams) can't be grabbed.
 - **Notes / JSON, Files** (import + export via share sheet), **encrypted backup
   & restore**.
 - **Icons** throughout via Ionicons; chessboard app icon generated in
@@ -56,8 +66,8 @@ npx expo start
 Install **Expo Go** from the App Store / Play Store, then scan the QR code shown
 in the terminal. The app opens on your phone.
 
-> First launch → set a master password. After that, unlock with the password or
-> (once enabled in Settings) Face ID / fingerprint.
+> First launch → set a 4-digit PIN (entered twice to confirm). After that,
+> unlock with the PIN or (once enabled in Settings) Face ID / fingerprint.
 
 > Note: `npx expo start` runs the app *through your computer* (it's the dev
 > server). Great for trying it out; for permanent, untethered use build a
@@ -116,12 +126,17 @@ matches.
 
 ## How the encryption works
 ```
-master password ──PBKDF2-SHA256 (150k iters, random salt)──▶ master key (never stored)
+4-digit PIN ──PBKDF2-SHA256 (150k iters, random salt)──▶ master key (never stored)
 master key ──wraps──▶ DEK (random 256-bit data key)
 DEK ──AES-256-GCM, unique nonce per item──▶ every photo, note, and file
 ```
-- **Envelope encryption:** the password derives a key that *wraps* a random DEK.
-  Changing your password only re-wraps the DEK — no re-encrypting your data.
+- **Envelope encryption:** the PIN derives a key that *wraps* a random DEK.
+  Changing your PIN only re-wraps the DEK — no re-encrypting your data.
+- **PIN, not a passphrase:** a 4-digit PIN is low-entropy by itself, so the
+  defense is *rate-limiting* — the app wipes the key on every exit and imposes an
+  exponential lockout after 5 wrong tries (it is not a brute-force-resistant
+  secret against an attacker who can copy the ciphertext off the device and
+  guess offline; keep that in mind, and keep an encrypted backup).
 - **Biometric unlock** stores the DEK in the OS hardware keychain
   (`expo-secure-store`), released only after a Face ID / fingerprint prompt.
 - **Authenticated encryption (GCM):** tampered data fails to decrypt.
@@ -148,8 +163,9 @@ defeating forensic extraction.
   round-trip / wrong-key / tamper detection / unique nonce, KDF, and the full
   VaultService (create, unlock, wrong-password rejection, CRUD round-trip,
   persistence across restart, *item names absent from plaintext on disk*,
-  password-change re-wrap, biometric keychain unlock, backup export→restore).
-  **20 tests.**
+  password-change re-wrap, biometric keychain unlock, backup export→restore),
+  plus the in-app browser's HLS (`.m3u8`) playlist parser (master variants,
+  segment resolution, fMP4 init, relative-URL math). **40 tests.**
 - **Runs on-device only:** camera-roll import, biometric prompt, the share
   sheet, and the gallery UI — these use native modules and light up in Expo Go.
 
@@ -160,11 +176,11 @@ The security-critical logic has **zero Expo imports** (it talks to `Storage` and
 ```
 src/crypto/    b64 · random · kdf · cipher (AES-GCM)        ← primitives (@noble)
 src/vault/     VaultService · types · ports · memoryPorts    ← the core (tested)
-src/platform/  expoStorage · expoKeychain                    ← device adapters
+src/platform/  expoStorage · expoKeychain · hls · videoDownload  ← device adapters
 src/state/     VaultContext (lock state + auto-lock)
-src/ui/        theme · components
-app/           onboarding · unlock · (vault)/{media,notes,files,settings}
-__tests__/     crypto + vault suites
+src/ui/        theme · components · PinPad (custom keypad + PinModal)
+app/           onboarding · unlock · (vault)/{media,notes,files,browser,settings}
+__tests__/     crypto + vault + hls suites
 ```
 
 ## Notes / next steps

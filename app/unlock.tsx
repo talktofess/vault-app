@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
-import { Alert } from "react-native";
+import { Alert, View } from "react-native";
 import { router } from "expo-router";
 import { useVault } from "../src/state/VaultContext";
-import { Button, Field, Muted, Screen, Title } from "../src/ui/components";
+import { Muted, Screen, Title } from "../src/ui/components";
+import { PIN_LENGTH, PinPad } from "../src/ui/PinPad";
 import { promptBiometric } from "../src/platform/expoKeychain";
 
 export default function Unlock() {
   const { vault, setUnlocked } = useVault();
-  const [pw, setPw] = useState("");
+  const [pin, setPin] = useState("");
   const [busy, setBusy] = useState(false);
   const [hasBio, setHasBio] = useState(false);
 
@@ -15,17 +16,25 @@ export default function Unlock() {
     vault.biometricAvailable().then(setHasBio);
   }, [vault]);
 
-  async function withPassword() {
+  // Submit automatically once 4 digits are entered.
+  useEffect(() => {
+    if (pin.length === PIN_LENGTH && !busy) withPin(pin);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pin]);
+
+  async function withPin(value: string) {
     setBusy(true);
     try {
       const wait = await vault.lockoutRemainingMs();
       if (wait > 0) {
         Alert.alert("Locked out", `Too many attempts. Try again in ${Math.ceil(wait / 1000)}s.`);
+        setPin("");
         return;
       }
-      const ok = await vault.unlock(pw);
+      const ok = await vault.unlock(value);
       if (!ok) {
-        Alert.alert("Incorrect", "Wrong master password.");
+        Alert.alert("Incorrect", "Wrong PIN.");
+        setPin("");
         return;
       }
       const intr = vault.getIntrusions();
@@ -40,7 +49,6 @@ export default function Unlock() {
       router.replace("/(vault)/media");
     } finally {
       setBusy(false);
-      setPw("");
     }
   }
 
@@ -61,11 +69,16 @@ export default function Unlock() {
 
   return (
     <Screen>
-      <Title>Unlock vault</Title>
-      <Muted>Enter your master password to decrypt your vault.</Muted>
-      <Field value={pw} onChangeText={setPw} placeholder="Master password" secureTextEntry autoFocus />
-      <Button label="Unlock" onPress={withPassword} loading={busy} />
-      {hasBio && <Button label="Use biometrics" onPress={withBiometric} variant="outline" />}
+      <Title>Enter your PIN</Title>
+      <Muted>Enter your 4-digit PIN to unlock your vault.</Muted>
+      <View style={{ flex: 1, justifyContent: "center" }}>
+        <PinPad
+          pin={pin}
+          onChange={setPin}
+          disabled={busy}
+          onBiometric={hasBio ? withBiometric : undefined}
+        />
+      </View>
     </Screen>
   );
 }

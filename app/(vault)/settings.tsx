@@ -7,6 +7,7 @@ import * as Sharing from "expo-sharing";
 import * as DocumentPicker from "expo-document-picker";
 import { useVault } from "../../src/state/VaultContext";
 import { Button, Field, Muted, Title } from "../../src/ui/components";
+import { PinModal } from "../../src/ui/PinPad";
 import { theme } from "../../src/ui/theme";
 import { biometricHardwareAvailable, promptBiometric } from "../../src/platform/expoKeychain";
 
@@ -14,17 +15,119 @@ export default function Settings() {
   const { vault, lock, setUnlocked } = useVault();
   const [bioOn, setBioOn] = useState(false);
   const [bioHw, setBioHw] = useState(false);
-  const [oldPw, setOldPw] = useState("");
-  const [newPw, setNewPw] = useState("");
   const [backupPw, setBackupPw] = useState("");
-  const [duressPw, setDuressPw] = useState("");
   const [hasDuress, setHasDuress] = useState(false);
   const [isDecoy, setIsDecoy] = useState(false);
+
+  // PIN-entry modal state machine (drives change PIN, decoy PIN, and the
+  // "new device PIN" step of a restore).
+  const [pinFlow, setPinFlow] = useState<null | "change" | "decoy" | "restore">(null);
+  const [pinStep, setPinStep] = useState("");
+  const [stash, setStash] = useState<{ current?: string; next?: string }>({});
+
+  function closePinFlow() {
+    setPinFlow(null);
+    setPinStep("");
+    setStash({});
+  }
+
+  async function onChangePin(pin: string) {
+    if (pinStep === "current") {
+      setStash({ current: pin });
+      setPinStep("new");
+    } else if (pinStep === "new") {
+      setStash((s) => ({ ...s, next: pin }));
+      setPinStep("confirm");
+    } else {
+      // confirm
+      if (pin !== stash.next) {
+        Alert.alert("PINs don't match", "Enter the new PIN again.");
+        setPinStep("new");
+        return;
+      }
+      try {
+        await vault.changePassword(stash.current!, stash.next!);
+        closePinFlow();
+        Alert.alert("Done", "Your PIN has been changed.");
+      } catch (e) {
+        closePinFlow();
+        Alert.alert("Error", e instanceof Error ? e.message : "Failed");
+      }
+    }
+  }
+
+  async function onDecoyPin(pin: string) {
+    if (pinStep === "set") {
+      setStash({ next: pin });
+      setPinStep("confirm");
+    } else {
+      if (pin !== stash.next) {
+        Alert.alert("PINs don't match", "Enter the decoy PIN again.");
+        setPinStep("set");
+        return;
+      }
+      try {
+        await vault.setDuressPassword(stash.next!);
+        setHasDuress(true);
+        closePinFlow();
+        Alert.alert(
+          "Decoy set",
+          "Entering this PIN at unlock opens a separate, empty vault — your real items stay hidden."
+        );
+      } catch (e) {
+        closePinFlow();
+        Alert.alert("Error", e instanceof Error ? e.message : "Failed");
+      }
+    }
+  }
+
+  // Restore: collect a new 4-digit device PIN (set + confirm), then import.
+  async function onRestorePin(pin: string) {
+    if (pinStep === "set") {
+      setStash({ next: pin });
+      setPinStep("confirm");
+      return;
+    }
+    if (pin !== stash.next) {
+      Alert.alert("PINs don't match", "Enter the device PIN again.");
+      setPinStep("set");
+      return;
+    }
+    const devicePin = stash.next!;
+    closePinFlow();
+    setBusy(true);
+    try {
+      await vault.wipe();
+      await vault.importVault(restoreArchive!, restoreBackupPw, devicePin);
+      setRestoreArchive(null);
+      setRestoreBackupPw("");
+      setUnlocked(true);
+      Alert.alert("Restored", "Your backup has been restored.");
+      router.replace("/(vault)/media");
+    } catch (e) {
+      Alert.alert("Restore failed", e instanceof Error ? e.message : "Failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function onPinSubmit(pin: string) {
+    if (pinFlow === "change") return onChangePin(pin);
+    if (pinFlow === "decoy") return onDecoyPin(pin);
+    if (pinFlow === "restore") return onRestorePin(pin);
+  }
+
+  function pinTitle(): string {
+    if (pinFlow === "change")
+      return pinStep === "current" ? "Enter current PIN" : pinStep === "new" ? "Enter new PIN" : "Confirm new PIN";
+    if (pinFlow === "decoy") return pinStep === "set" ? "Enter decoy PIN" : "Confirm decoy PIN";
+    if (pinFlow === "restore") return pinStep === "set" ? "Set a device PIN" : "Confirm device PIN";
+    return "";
+  }
 
   // restore flow
   const [restoreArchive, setRestoreArchive] = useState<string | null>(null);
   const [restoreBackupPw, setRestoreBackupPw] = useState("");
-  const [restoreNewPw, setRestoreNewPw] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -33,24 +136,6 @@ export default function Settings() {
     vault.hasDuress().then(setHasDuress);
     setIsDecoy(vault.isDecoy());
   }, [vault]);
-
-  async function saveDuress() {
-    if (duressPw.length < 8) {
-      Alert.alert("Weak password", "Decoy password must be at least 8 characters.");
-      return;
-    }
-    try {
-      await vault.setDuressPassword(duressPw);
-      setDuressPw("");
-      setHasDuress(true);
-      Alert.alert(
-        "Decoy set",
-        "Entering this password at unlock opens a separate, empty vault — your real items stay hidden."
-      );
-    } catch (e) {
-      Alert.alert("Error", e instanceof Error ? e.message : "Failed");
-    }
-  }
 
   async function toggleBio() {
     if (bioOn) {
@@ -61,21 +146,6 @@ export default function Settings() {
     if (!(await promptBiometric("Enable unlock"))) return;
     await vault.enableBiometric();
     setBioOn(true);
-  }
-
-  async function changePassword() {
-    if (newPw.length < 8) {
-      Alert.alert("Weak password", "Use at least 8 characters.");
-      return;
-    }
-    try {
-      await vault.changePassword(oldPw, newPw);
-      setOldPw("");
-      setNewPw("");
-      Alert.alert("Done", "Master password changed.");
-    } catch (e) {
-      Alert.alert("Error", e instanceof Error ? e.message : "Failed");
-    }
   }
 
   async function exportBackup() {
@@ -98,13 +168,10 @@ export default function Settings() {
     setRestoreArchive(content);
   }
 
-  // Step 2: confirm (this REPLACES the current vault), then wipe + import.
-  async function doRestore() {
+  // Step 2: confirm (this REPLACES the current vault), then open the PIN flow to
+  // pick a new device PIN; onRestorePin() runs the actual wipe + import.
+  function doRestore() {
     if (!restoreArchive) return;
-    if (restoreNewPw.length < 8) {
-      Alert.alert("Weak password", "New password must be at least 8 characters.");
-      return;
-    }
     Alert.alert(
       "Restore backup",
       "This ERASES the current contents and replaces them with the backup. Continue?",
@@ -113,22 +180,10 @@ export default function Settings() {
         {
           text: "Restore",
           style: "destructive",
-          onPress: async () => {
-            setBusy(true);
-            try {
-              await vault.wipe();
-              await vault.importVault(restoreArchive, restoreBackupPw, restoreNewPw);
-              setRestoreArchive(null);
-              setRestoreBackupPw("");
-              setRestoreNewPw("");
-              setUnlocked(true);
-              Alert.alert("Restored", "Your backup has been restored.");
-              router.replace("/(vault)/media");
-            } catch (e) {
-              Alert.alert("Restore failed", e instanceof Error ? e.message : "Failed");
-            } finally {
-              setBusy(false);
-            }
+          onPress: () => {
+            setStash({});
+            setPinStep("set");
+            setPinFlow("restore");
           },
         },
       ]
@@ -150,6 +205,7 @@ export default function Settings() {
   }
 
   return (
+    <>
     <ScrollView style={{ flex: 1, backgroundColor: theme.bg }} contentContainerStyle={{ padding: 20, gap: 18 }}>
       <Title>Settings</Title>
 
@@ -165,21 +221,34 @@ export default function Settings() {
         )}
       </Section>
 
-      <Section icon="key-outline" title="Change password">
-        <Field value={oldPw} onChangeText={setOldPw} placeholder="Current password" secureTextEntry />
-        <Field value={newPw} onChangeText={setNewPw} placeholder="New password" secureTextEntry />
-        <Button label="Change password" onPress={changePassword} variant="outline" />
+      <Section icon="key-outline" title="Change PIN">
+        <Button
+          label="Change PIN"
+          onPress={() => {
+            setStash({});
+            setPinStep("current");
+            setPinFlow("change");
+          }}
+          variant="outline"
+        />
       </Section>
 
       {!isDecoy && (
-        <Section icon="eye-off-outline" title="Decoy (duress) password">
+        <Section icon="eye-off-outline" title="Decoy (duress) PIN">
           <Muted>
-            Set a second password that opens a separate, empty vault. If anyone
-            ever forces you to unlock, give them this one — your real items stay
-            encrypted and invisible. {hasDuress ? "A decoy is currently set; saving replaces it." : ""}
+            Set a second PIN that opens a separate, empty vault. If anyone ever
+            forces you to unlock, give them this one — your real items stay
+            encrypted and invisible. {hasDuress ? "A decoy is currently set; setting again replaces it." : ""}
           </Muted>
-          <Field value={duressPw} onChangeText={setDuressPw} placeholder="Decoy password" secureTextEntry />
-          <Button label={hasDuress ? "Replace decoy password" : "Set decoy password"} onPress={saveDuress} variant="outline" />
+          <Button
+            label={hasDuress ? "Replace decoy PIN" : "Set decoy PIN"}
+            onPress={() => {
+              setStash({});
+              setPinStep("set");
+              setPinFlow("decoy");
+            }}
+            variant="outline"
+          />
         </Section>
       )}
 
@@ -200,9 +269,8 @@ export default function Settings() {
           </>
         ) : (
           <>
-            <Muted>Backup loaded. Enter its backup password and a new password for this device.</Muted>
+            <Muted>Backup loaded. Enter its backup password — you&apos;ll then pick a new 4-digit PIN for this device.</Muted>
             <Field value={restoreBackupPw} onChangeText={setRestoreBackupPw} placeholder="Backup password" secureTextEntry />
-            <Field value={restoreNewPw} onChangeText={setRestoreNewPw} placeholder="New device password" secureTextEntry />
             <Button label="Restore now" onPress={doRestore} loading={busy} />
             <Button label="Cancel" onPress={() => setRestoreArchive(null)} variant="outline" />
           </>
@@ -221,6 +289,15 @@ export default function Settings() {
         jailbroken phone. There is no password recovery — keep a backup.
       </Muted>
     </ScrollView>
+
+    <PinModal
+      visible={pinFlow !== null}
+      title={pinTitle()}
+      step={`${pinFlow}-${pinStep}`}
+      onSubmit={onPinSubmit}
+      onCancel={closePinFlow}
+    />
+    </>
   );
 }
 
