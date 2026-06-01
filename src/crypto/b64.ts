@@ -56,10 +56,63 @@ export function fromB64(str: string): Uint8Array {
   return out;
 }
 
+// Hand-rolled UTF-8, deliberately NOT using TextEncoder/TextDecoder: Hermes
+// (the RN engine) ships TextEncoder but NOT TextDecoder, so `new TextDecoder()`
+// throws on-device. Because create() only encodes while unlock() decodes, that
+// gap made every re-login fail with "wrong PIN" while onboarding worked. These
+// pure-JS versions behave identically on Hermes, Node, and the browser.
+
 export function utf8ToBytes(s: string): Uint8Array {
-  return new TextEncoder().encode(s);
+  const out: number[] = [];
+  for (let i = 0; i < s.length; i++) {
+    let code = s.charCodeAt(i);
+    // combine a surrogate pair into a single code point
+    if (code >= 0xd800 && code <= 0xdbff && i + 1 < s.length) {
+      const next = s.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        code = 0x10000 + ((code - 0xd800) << 10) + (next - 0xdc00);
+        i++;
+      }
+    }
+    if (code < 0x80) {
+      out.push(code);
+    } else if (code < 0x800) {
+      out.push(0xc0 | (code >> 6), 0x80 | (code & 0x3f));
+    } else if (code < 0x10000) {
+      out.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
+    } else {
+      out.push(
+        0xf0 | (code >> 18),
+        0x80 | ((code >> 12) & 0x3f),
+        0x80 | ((code >> 6) & 0x3f),
+        0x80 | (code & 0x3f)
+      );
+    }
+  }
+  return new Uint8Array(out);
 }
 
 export function bytesToUtf8(b: Uint8Array): string {
-  return new TextDecoder().decode(b);
+  let out = "";
+  let i = 0;
+  while (i < b.length) {
+    const b1 = b[i++];
+    if (b1 < 0x80) {
+      out += String.fromCharCode(b1);
+    } else if (b1 < 0xe0) {
+      const b2 = b[i++] & 0x3f;
+      out += String.fromCharCode(((b1 & 0x1f) << 6) | b2);
+    } else if (b1 < 0xf0) {
+      const b2 = b[i++] & 0x3f;
+      const b3 = b[i++] & 0x3f;
+      out += String.fromCharCode(((b1 & 0x0f) << 12) | (b2 << 6) | b3);
+    } else {
+      const b2 = b[i++] & 0x3f;
+      const b3 = b[i++] & 0x3f;
+      const b4 = b[i++] & 0x3f;
+      const code = (((b1 & 0x07) << 18) | (b2 << 12) | (b3 << 6) | b4) - 0x10000;
+      out += String.fromCharCode(0xd800 + (code >> 10), 0xdc00 + (code & 0x3ff));
+    }
+  }
+  return out;
 }
