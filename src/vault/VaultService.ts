@@ -26,6 +26,8 @@ import {
 import type { CloudStore } from "../cloud/ports";
 import { buildVaultKeys, recoverDek } from "../cloud/keyflows";
 import { decodeFk, decodeMeta, decodeObject, encodeItem } from "../cloud/codec";
+import { StreamReader, type RemoteStream } from "../cloud/stream";
+import { CHUNK } from "../crypto/chunkCipher";
 
 const BIO_KEY = "vault.dek"; // keychain entry holding the DEK for biometric unlock
 
@@ -613,6 +615,25 @@ export class VaultService {
   isCached(id: string): boolean {
     const item = this.index!.items.find((i) => i.id === id);
     return !!item && item.cached !== false;
+  }
+
+  /**
+   * A seekable, range-based reader over a remote item's encrypted object — the
+   * basis for progressive ("watch while downloading") playback. The FK is
+   * unwrapped here so the player layer never sees key material.
+   */
+  openRemoteStream(cloud: CloudStore, id: string): RemoteStream {
+    this.requireUnlocked();
+    const item = this.index!.items.find((i) => i.id === id);
+    if (!item?.remote) throw new Error("No cloud copy");
+    const reader = new StreamReader({
+      store: cloud,
+      path: item.remote.path,
+      fk: decodeFk(this.dek!, item.remote.wrappedFk),
+      chunkSize: CHUNK,
+      byteSize: item.remote.byteSize,
+    });
+    return { chunkSize: CHUNK, chunkCount: reader.chunkCount, plainSize: item.size, mime: item.mime, reader };
   }
 
   /** Download + decrypt a remote item's bytes WITHOUT persisting (transient view). */

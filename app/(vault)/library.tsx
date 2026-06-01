@@ -25,6 +25,7 @@ import { theme } from "../../src/ui/theme";
 import { makeViewableUri, releaseViewableUri, saveBytes } from "../../src/platform/io";
 import { compressImage, readFileBytes, deleteFromGallery } from "../../src/platform/media";
 import { readBytesFromUri } from "../../src/platform/io";
+import { streamRemoteToUri } from "../../src/platform/streamMedia";
 import { bytesToUtf8, utf8ToBytes } from "../../src/crypto/b64";
 import {
   CATEGORY_COLOR,
@@ -39,7 +40,7 @@ import {
 import type { VaultItem } from "../../src/vault/types";
 
 type Sort = "new" | "name" | "size";
-type Preview = { uri: string; item: VaultItem; av: boolean };
+type Preview = { uri: string; item: VaultItem; av: boolean; release: () => Promise<void> | void };
 type NoteEdit = { item?: VaultItem; name: string; body: string; json: boolean };
 type TextView = { item: VaultItem; body: string };
 type AlbumTarget = { ids: string[] };
@@ -181,10 +182,23 @@ export default function Library() {
         setNoteEdit({ item, name: item.name, body: bytesToUtf8(await readBytes(item)), json: !!item.isJson });
         return;
       }
-      if (cat === "image" || cat === "video" || cat === "audio") {
+      if (cat === "image") {
         const data = await readBytes(item);
         const uri = await makeViewableUri(item.id, data, viewExt(item));
-        setPreview({ uri, item, av: cat !== "image" });
+        setPreview({ uri, item, av: false, release: () => releaseViewableUri(uri) });
+        return;
+      }
+      if (cat === "video" || cat === "audio") {
+        // Remote + uncached -> stream (progressive on web); otherwise read the
+        // local blob and play it directly.
+        if (needsFetch && cloud) {
+          const r = await streamRemoteToUri(vault.openRemoteStream(cloud.store, item.id));
+          setPreview({ uri: r.uri, item, av: true, release: r.release });
+        } else {
+          const data = await readBytes(item);
+          const uri = await makeViewableUri(item.id, data, viewExt(item));
+          setPreview({ uri, item, av: true, release: () => releaseViewableUri(uri) });
+        }
         return;
       }
       if (isTextLike(cat, item.name, item.mime)) {
@@ -249,7 +263,7 @@ export default function Library() {
   }
 
   async function closePreview() {
-    if (preview) await releaseViewableUri(preview.uri);
+    if (preview) await preview.release();
     setPreview(null);
   }
 

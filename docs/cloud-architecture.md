@@ -159,10 +159,18 @@ would break zero-knowledge.
 - **Phase 3 — UI:** ✅ Cloud sync screen (auth + passphrase + sync), Library
   cloud/cached badges, per-item Download / Remove-download, sync button,
   delete-everywhere.
-- **Phase 4 — streaming player:** ⏳ chunk format + `downloadRange` are in place;
-  the progressive web (MSE) / native (loopback decrypt) players are the
-  remaining work. Today, opening an uncached item streams it transiently
-  (download-decrypt) and "Download" caches it for offline.
+- **Phase 4 — streaming player:** ✅ (with caveats) `src/cloud/stream.ts`
+  `StreamReader` fetches + decrypts chunk-by-chunk over HTTP Range (tested:
+  reconstruction, seek, range-only, tamper). `VaultService.openRemoteStream`
+  exposes it. Players in `src/platform/streamMedia.{ts,web.ts}`:
+  - **Web:** genuine watch-while-downloading via **Media Source Extensions** —
+    decrypt chunk 0, append, start playback, stream the rest in the background.
+    Falls back to a buffered Blob when the container isn't MSE-compatible (e.g.
+    a non-fragmented MP4), so playback always works.
+  - **Native:** buffered — decrypts via Range (constant per-chunk memory) to a
+    temp file, then plays. True progressive native playback still needs a
+    loopback decrypt-server (deferred) or faststart/fragmented sources.
+  Wired into the Library: opening an uncached remote video/audio streams it.
 
 ### Not yet verified live
 The crypto and sync logic are unit + integration tested locally, but the
