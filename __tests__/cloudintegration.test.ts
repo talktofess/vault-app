@@ -135,4 +135,38 @@ describe("cloud sync across two devices", () => {
     expect(removed).toBe(1);
     expect(b.listItems()).toHaveLength(0);
   });
+
+  it("restoreFromCloud bootstraps a fresh device from email-account + passphrase", async () => {
+    const { store } = fakeCloud();
+    const a = new VaultService(new MemoryStorage(), new MemoryKeychain());
+    await a.create("1234");
+    await a.addItem("media", "a.jpg", utf8ToBytes("aaa"), { mime: "image/jpeg" });
+    await a.addItem("file", "b.bin", utf8ToBytes("bbb"));
+    await a.enableCloud(store, "the-passphrase");
+    await a.pushAll(store, USER);
+
+    const b = new VaultService(new MemoryStorage(), new MemoryKeychain());
+    expect(await b.checkCloudPassphrase(store, "nope")).toBe(false);
+    expect(await b.checkCloudPassphrase(store, "the-passphrase")).toBe(true);
+
+    const { pulled } = await b.restoreFromCloud(store, "the-passphrase", "5678");
+    expect(pulled).toBe(2);
+    expect(b.isUnlocked()).toBe(true);
+    expect(b.listItems().map((i) => i.name).sort()).toEqual(["a.jpg", "b.bin"]);
+    expect(bytesToUtf8(await b.fetchRemoteBytes(store, b.listItems()[0].id)).length).toBeGreaterThan(0);
+
+    // Refuses to clobber an existing local vault.
+    await expect(b.restoreFromCloud(store, "the-passphrase", "0000")).rejects.toThrow(/already exists/i);
+  });
+
+  it("restoreFromCloud rejects a wrong passphrase", async () => {
+    const { store } = fakeCloud();
+    const a = new VaultService(new MemoryStorage(), new MemoryKeychain());
+    await a.create("1234");
+    await a.enableCloud(store, "right-pass");
+
+    const b = new VaultService(new MemoryStorage(), new MemoryKeychain());
+    await expect(b.restoreFromCloud(store, "wrong-pass", "0000")).rejects.toThrow();
+    expect(await b.exists()).toBe(false); // nothing was created
+  });
 });

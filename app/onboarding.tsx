@@ -2,14 +2,14 @@ import { useEffect, useState } from "react";
 import { Alert, View } from "react-native";
 import { router } from "expo-router";
 import { useVault } from "../src/state/VaultContext";
-import { Muted, Screen, Title } from "../src/ui/components";
+import { Button, Muted, Screen, Title } from "../src/ui/components";
 import { PIN_LENGTH, PinPad } from "../src/ui/PinPad";
 
 // Two-step PIN setup: enter a 4-digit PIN, then confirm it. The PIN is just the
 // "password" the vault crypto derives a key from — short by design, but the
 // vault still locks instantly on exit and rate-limits guesses after 5 failures.
 export default function Onboarding() {
-  const { vault, setUnlocked } = useVault();
+  const { vault, setUnlocked, cloud } = useVault();
   const [stage, setStage] = useState<"set" | "confirm">("set");
   const [first, setFirst] = useState("");
   const [pin, setPin] = useState("");
@@ -63,6 +63,13 @@ export default function Onboarding() {
       <View style={{ flex: 1, justifyContent: "center" }}>
         <PinPad pin={pin} onChange={setPin} disabled={busy} />
       </View>
+      {stage === "set" && cloud && (
+        <Button
+          label="Already have a cloud vault? Restore"
+          variant="outline"
+          onPress={() => router.push("/restore-cloud")}
+        />
+      )}
     </Screen>
   );
 }

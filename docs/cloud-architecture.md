@@ -144,10 +144,13 @@ would break zero-knowledge.
    and `EXPO_PUBLIC_SUPABASE_ANON_KEY` from Settings → API.
 4. **Rebuild** the app (env vars inline at build time). With no env vars set the
    app runs fully local and all cloud UI hides.
-5. In the app: **Settings → Cloud sync** → sign in / create account → set a
-   strong **encryption passphrase** (the zero-knowledge root) → it pushes your
-   local items. On another device: install, unlock, Cloud sync → sign in → enter
-   the same passphrase to link, then **Sync**.
+5. **First device:** Settings → Cloud sync → create account → set a strong
+   **encryption passphrase** (the zero-knowledge root) → it pushes your local
+   items.
+6. **Another device:** install → on the onboarding screen tap **"Already have a
+   cloud vault? Restore"** → sign in → enter the same passphrase → choose a new
+   device PIN. The DEK is recovered locally and the metadata pulled; tap any
+   item to download it.
 
 ## Build status
 
@@ -158,7 +161,9 @@ would break zero-knowledge.
   and covered by a two-device integration test using in-memory fakes.
 - **Phase 3 — UI:** ✅ Cloud sync screen (auth + passphrase + sync), Library
   cloud/cached badges, per-item Download / Remove-download, sync button,
-  delete-everywhere.
+  delete-everywhere, and a **Restore-from-cloud** onboarding flow for
+  bootstrapping a fresh device (VaultService.restoreFromCloud /
+  checkCloudPassphrase, covered by integration tests).
 - **Phase 4 — streaming player:** ✅ (with caveats) `src/cloud/stream.ts`
   `StreamReader` fetches + decrypts chunk-by-chunk over HTTP Range (tested:
   reconstruction, seek, range-only, tamper). `VaultService.openRemoteStream`

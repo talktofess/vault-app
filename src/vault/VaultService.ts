@@ -617,6 +617,37 @@ export class VaultService {
     return !!item && item.cached !== false;
   }
 
+  /** Does the passphrase open this account's cloud key-set? (pre-flight check) */
+  async checkCloudPassphrase(cloud: CloudStore, passphrase: string): Promise<boolean> {
+    const keys = await cloud.getVaultKeys();
+    if (!keys) return false;
+    try {
+      recoverDek(keys, passphrase);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * New-device bootstrap: recover the account DEK with the passphrase, seed a
+   * fresh local vault under a new PIN that wraps that same DEK, then pull the
+   * cloud metadata. Refuses if a local vault already exists.
+   */
+  async restoreFromCloud(
+    cloud: CloudStore,
+    passphrase: string,
+    pin: string
+  ): Promise<{ pulled: number }> {
+    if (await this.exists()) throw new Error("A vault already exists on this device");
+    const keys = await cloud.getVaultKeys();
+    if (!keys) throw new Error("No cloud vault found for this account");
+    const dek = recoverDek(keys, passphrase); // throws on a wrong passphrase
+    await this.createWithDek(pin, dek);
+    const { added } = await this.pull(cloud);
+    return { pulled: added };
+  }
+
   /**
    * A seekable, range-based reader over a remote item's encrypted object — the
    * basis for progressive ("watch while downloading") playback. The FK is

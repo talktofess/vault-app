@@ -20,6 +20,7 @@ export default function RootLayout() {
           <Stack.Screen name="index" options={{ headerShown: false }} />
           <Stack.Screen name="chess" options={{ headerShown: false }} />
           <Stack.Screen name="onboarding" options={{ title: "Create your vault" }} />
+          <Stack.Screen name="restore-cloud" options={{ title: "Restore from cloud" }} />
           <Stack.Screen name="unlock" options={{ headerShown: false }} />
           <Stack.Screen name="(vault)" options={{ headerShown: false }} />
         </Stack>
