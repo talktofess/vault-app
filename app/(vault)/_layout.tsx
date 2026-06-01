@@ -1,6 +1,9 @@
+import { Platform } from "react-native";
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { theme } from "../../src/ui/theme";
+
+const isWeb = Platform.OS === "web";
 
 export default function VaultTabs() {
   return (
@@ -46,14 +49,19 @@ export default function VaultTabs() {
         name="camera"
         options={{
           title: "Camera",
+          // The in-app camera is native-only; hide its tab on web (the route
+          // still exists as a placeholder).
+          href: isWeb ? null : undefined,
           tabBarIcon: ({ color, size }) => <Ionicons name="camera-outline" size={size} color={color} />,
         }}
       />
       <Tabs.Screen
         name="browser"
         options={{
-          title: "Browse",
-          tabBarIcon: ({ color, size }) => <Ionicons name="globe-outline" size={size} color={color} />,
+          title: isWeb ? "Download" : "Browse",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name={isWeb ? "download-outline" : "globe-outline"} size={size} color={color} />
+          ),
         }}
       />
       <Tabs.Screen

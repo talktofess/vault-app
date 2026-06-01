@@ -9,7 +9,7 @@ import React, {
   useMemo,
   useState,
 } from "react";
-import { AppState } from "react-native";
+import { AppState, Platform } from "react-native";
 import { VaultService } from "../vault/VaultService";
 import { ExpoStorage } from "../platform/expoStorage";
 import { ExpoKeychain } from "../platform/expoKeychain";
@@ -36,8 +36,16 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
   // Lock the moment the app leaves the foreground (background OR the iOS/Android
   // app switcher 'inactive' state). Returning to the app always requires a
-  // fresh unlock — the key is wiped from memory on every exit.
+  // fresh unlock — the key is wiped from memory on every exit. On web the analog
+  // is the tab becoming hidden (switching tabs, minimizing, closing).
   useEffect(() => {
+    if (Platform.OS === "web") {
+      const onHide = () => {
+        if (typeof document !== "undefined" && document.visibilityState === "hidden") lock();
+      };
+      document.addEventListener("visibilitychange", onHide);
+      return () => document.removeEventListener("visibilitychange", onHide);
+    }
     const sub = AppState.addEventListener("change", (next) => {
       if (next === "background" || next === "inactive") lock();
     });

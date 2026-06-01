@@ -39,6 +39,11 @@
         "android.permission.USE_FINGERPRINT"
       ]
     },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/icon.png"
+    },
     "plugins": [
       "expo-router",
       "expo-secure-store",

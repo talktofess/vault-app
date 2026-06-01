@@ -67,17 +67,5 @@ export class ExpoStorage implements Storage {
   }
 }
 
-// Decrypt an item to a temporary plaintext file so the OS viewer/player can read
-// it; callers delete it when done. (Trade-off: brief plaintext on disk in the
-// private sandbox — documented in the threat model.)
-export async function writeTempPlaintext(id: string, data: Uint8Array, ext: string): Promise<string> {
-  const path = FileSystem.cacheDirectory + `tmp_${id}.${ext}`;
-  await FileSystem.writeAsStringAsync(path, toB64(data), {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-  return path;
-}
-
-export async function deleteTemp(path: string): Promise<void> {
-  await FileSystem.deleteAsync(path, { idempotent: true });
-}
+// Note: decrypt-to-temp for previews and file export live in ./io (io.ts /
+// io.web.ts) so the web build can swap in a browser-native implementation.

@@ -7,7 +7,7 @@ import * as ImagePicker from "expo-image-picker";
 import { useVault } from "../../src/state/VaultContext";
 import { Button, Field, Muted, Screen, Title } from "../../src/ui/components";
 import { theme } from "../../src/ui/theme";
-import { writeTempPlaintext, deleteTemp } from "../../src/platform/expoStorage";
+import { makeViewableUri, releaseViewableUri } from "../../src/platform/io";
 import { compressImage, readFileBytes, deleteFromGallery } from "../../src/platform/media";
 import type { VaultItem } from "../../src/vault/types";
 
@@ -74,12 +74,12 @@ export default function Media() {
   async function openItem(item: VaultItem) {
     const data = await vault.readItem(item.id);
     const ext = item.mime?.includes("video") ? "mp4" : "jpg";
-    const uri = await writeTempPlaintext(item.id, data, ext);
+    const uri = await makeViewableUri(item.id, data, ext);
     setPreview({ uri, item });
   }
 
   async function closePreview() {
-    if (preview) await deleteTemp(preview.uri);
+    if (preview) await releaseViewableUri(preview.uri);
     setPreview(null);
   }
 

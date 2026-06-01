@@ -2,13 +2,10 @@ import { useCallback, useState } from "react";
 import { Alert, FlatList, Pressable, Text, View } from "react-native";
 import { useFocusEffect } from "expo-router";
 import * as DocumentPicker from "expo-document-picker";
-import * as FileSystem from "expo-file-system";
-import * as Sharing from "expo-sharing";
 import { useVault } from "../../src/state/VaultContext";
 import { Button, Muted, Screen, Title } from "../../src/ui/components";
 import { theme } from "../../src/ui/theme";
-import { fromB64 } from "../../src/crypto/b64";
-import { writeTempPlaintext, deleteTemp } from "../../src/platform/expoStorage";
+import { readBytesFromUri, saveBytes } from "../../src/platform/io";
 import type { VaultItem } from "../../src/vault/types";
 
 function fmtSize(n: number): string {
@@ -31,28 +28,17 @@ export default function Files() {
     const res = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
     if (res.canceled) return;
     for (const asset of res.assets) {
-      const b64 = await FileSystem.readAsStringAsync(asset.uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      await vault.addItem("file", asset.name, fromB64(b64), { mime: asset.mimeType });
+      const bytes = await readBytesFromUri(asset.uri);
+      await vault.addItem("file", asset.name, bytes, { mime: asset.mimeType });
     }
     refresh();
   }
 
-  // Decrypt to a temp file and hand to the OS share sheet (the "download" path).
+  // Decrypt and export out of the vault: the OS share sheet on native, a browser
+  // download on web (the "download" path).
   async function exportFile(item: VaultItem) {
     const data = await vault.readItem(item.id);
-    const ext = item.name.includes(".") ? item.name.split(".").pop()! : "bin";
-    const uri = await writeTempPlaintext(item.id, data, ext);
-    try {
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri, { mimeType: item.mime });
-      } else {
-        Alert.alert("Saved", "Sharing is not available on this device.");
-      }
-    } finally {
-      await deleteTemp(uri);
-    }
+    await saveBytes(item.name, item.mime, data);
   }
 
   async function remove(item: VaultItem) {

@@ -2,13 +2,12 @@ import { useEffect, useState } from "react";
 import { Alert, ScrollView, Text, View } from "react-native";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import * as FileSystem from "expo-file-system";
-import * as Sharing from "expo-sharing";
 import * as DocumentPicker from "expo-document-picker";
 import { useVault } from "../../src/state/VaultContext";
 import { Button, Field, Muted, Title } from "../../src/ui/components";
 import { PinModal } from "../../src/ui/PinPad";
 import { theme } from "../../src/ui/theme";
+import { readTextFromUri, saveText } from "../../src/platform/io";
 import { biometricHardwareAvailable, promptBiometric } from "../../src/platform/expoKeychain";
 
 export default function Settings() {
@@ -154,9 +153,7 @@ export default function Settings() {
       return;
     }
     const archive = await vault.exportVault(backupPw);
-    const path = FileSystem.cacheDirectory + `backup-${Date.now()}.json`;
-    await FileSystem.writeAsStringAsync(path, archive);
-    if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(path);
+    await saveText(`backup-${Date.now()}.json`, archive);
     setBackupPw("");
   }
 
@@ -164,7 +161,7 @@ export default function Settings() {
   async function pickRestore() {
     const res = await DocumentPicker.getDocumentAsync({ type: "application/json" });
     if (res.canceled) return;
-    const content = await FileSystem.readAsStringAsync(res.assets[0].uri);
+    const content = await readTextFromUri(res.assets[0].uri);
     setRestoreArchive(content);
   }
 
