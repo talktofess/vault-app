@@ -1,6 +1,6 @@
-// Cloud sync control panel: sign in/up (Supabase Auth = identity only), set the
-// zero-knowledge passphrase (the cloud encryption root), link this device, and
-// sync. The 4-digit PIN is never involved here — see docs/cloud-architecture.md.
+// Cloud sync, "safe words only". No email/verification: the safe words derive a
+// hidden Supabase account AND the encryption key. PIN unlocks the device; safe
+// words unlock the cloud — that's the whole model. See docs/cloud-architecture.md.
 import { useCallback, useEffect, useState } from "react";
 import { Alert, ScrollView, Text, View } from "react-native";
 import { useFocusEffect } from "expo-router";
@@ -8,21 +8,20 @@ import { Ionicons } from "@expo/vector-icons";
 import { useVault } from "../../src/state/VaultContext";
 import { Button, Field, Muted, Title } from "../../src/ui/components";
 import { theme } from "../../src/ui/theme";
+import { ensureSignedIn } from "../../src/cloud/account";
+
+const MIN_WORDS = 10;
 
 export default function Cloud() {
   const { vault, cloud, unlocked } = useVault();
-  const [userId, setUserId] = useState<string | null>(null);
-  const [enabled, setEnabled] = useState(false);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [passphrase, setPassphrase] = useState("");
+  const [linked, setLinked] = useState(false);
+  const [safeWords, setSafeWords] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!cloud) return;
     const uid = await cloud.auth.currentUserId();
-    setUserId(uid);
-    if (uid && unlocked) setEnabled(await vault.cloudEnabled(cloud.store));
+    setLinked(!!uid && unlocked && (await vault.cloudEnabled(cloud.store)));
   }, [cloud, vault, unlocked]);
 
   useFocusEffect(useCallback(() => {
@@ -38,122 +37,100 @@ export default function Cloud() {
         <Title>Cloud sync</Title>
         <Muted>
           Cloud isn&apos;t configured in this build. Set EXPO_PUBLIC_SUPABASE_URL and
-          EXPO_PUBLIC_SUPABASE_ANON_KEY (see docs/cloud-architecture.md), then rebuild.
-          The vault works fully offline without it.
+          EXPO_PUBLIC_SUPABASE_ANON_KEY (see docs/cloud-architecture.md), then rebuild. The vault
+          works fully offline without it.
         </Muted>
       </Panel>
     );
   }
 
-  async function withBusy(label: string, fn: () => Promise<void>) {
-    setBusy(label);
+  async function connect() {
+    if (safeWords.trim().length < MIN_WORDS) {
+      Alert.alert("Safe words", `Use at least ${MIN_WORDS} characters. Several unrelated words are ideal — this single secret unlocks your cloud on every device, and there's no recovery if you lose it.`);
+      return;
+    }
+    setBusy("Connecting…");
     try {
-      await fn();
+      await ensureSignedIn(cloud!.auth, safeWords.trim());
+      const uid = await cloud!.auth.currentUserId();
+      if (!uid) throw new Error("Sign-in did not complete.");
+
+      if (!(await vault.cloudEnabled(cloud!.store))) {
+        await vault.enableCloud(cloud!.store, safeWords.trim()); // first device
+      } else if (!(await vault.cloudKeyMatchesLocal(cloud!.store, safeWords.trim()))) {
+        throw new Error(
+          "These safe words don't match this device's vault. To use a different cloud vault, reinstall and choose Restore on the welcome screen."
+        );
+      }
+      const pushed = await vault.pushAll(cloud!.store, uid);
+      const { added } = await vault.pull(cloud!.store);
+      setSafeWords("");
+      setLinked(true);
+      Alert.alert("Cloud connected", `Synced — uploaded ${pushed}, pulled ${added} new.`);
     } catch (e) {
-      Alert.alert("Cloud error", e instanceof Error ? e.message : "Something went wrong.");
+      const msg = e instanceof Error ? e.message : "Something went wrong.";
+      if (/confirm/i.test(msg)) {
+        Alert.alert(
+          "Turn off email confirmation",
+          "This project still requires email confirmation, which blocks the safe-words sign-in. In Supabase: Authentication → Providers → Email → turn OFF “Confirm email”, then try again."
+        );
+      } else {
+        Alert.alert("Couldn't connect", msg);
+      }
     } finally {
       setBusy(null);
     }
   }
 
-  async function signIn() {
-    await withBusy("Signing in…", async () => {
-      await cloud!.auth.signIn(email.trim(), password);
-      setPassword("");
-      await refresh();
-    });
-  }
-  async function signUp() {
-    await withBusy("Creating account…", async () => {
-      await cloud!.auth.signUp(email.trim(), password);
-      Alert.alert("Check your email", "Confirm your address if required, then sign in.");
-      setPassword("");
-      await refresh();
-    });
-  }
-  async function signOut() {
-    await withBusy("Signing out…", async () => {
-      await cloud!.auth.signOut();
-      await refresh();
-    });
-  }
-
-  // Enable (first time) or link this device, then do a first sync.
-  async function enableOrLink() {
-    if (passphrase.length < 8) {
-      Alert.alert("Weak passphrase", "Use at least 8 characters — this is your cloud encryption root.");
-      return;
-    }
-    const uid = await cloud!.auth.currentUserId();
-    if (!uid) return;
-    await withBusy("Linking…", async () => {
-      const exists = await vault.cloudEnabled(cloud!.store);
-      if (!exists) {
-        await vault.enableCloud(cloud!.store, passphrase);
-      } else if (!(await vault.cloudKeyMatchesLocal(cloud!.store, passphrase))) {
-        throw new Error(
-          "This account already has a cloud vault under a different passphrase/key. " +
-            "To use it on this device, do a fresh install and restore from it instead of linking."
-        );
-      }
-      setPassphrase("");
-      const pushed = await vault.pushAll(cloud!.store, uid);
-      const { added } = await vault.pull(cloud!.store);
-      setEnabled(true);
-      Alert.alert("Cloud linked", `Uploaded ${pushed} item(s); pulled ${added} new.`);
-    });
-  }
-
   async function syncNow() {
-    const uid = await cloud!.auth.currentUserId();
-    if (!uid) return;
-    await withBusy("Syncing…", async () => {
+    setBusy("Syncing…");
+    try {
+      const uid = await cloud!.auth.currentUserId();
+      if (!uid) {
+        setLinked(false);
+        return;
+      }
       const pushed = await vault.pushAll(cloud!.store, uid);
       const { added, removed } = await vault.pull(cloud!.store);
       Alert.alert("Synced", `Pushed ${pushed}, pulled ${added} new, removed ${removed}.`);
-    });
+    } catch (e) {
+      Alert.alert("Sync failed", e instanceof Error ? e.message : "Failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function disconnect() {
+    await cloud!.auth.signOut();
+    setLinked(false);
   }
 
   return (
     <Panel>
       <Title>Cloud sync</Title>
 
-      {!userId ? (
-        <Section icon="person-circle-outline" title="Account">
-          <Muted>Sign in to sync your vault across devices. This identity is separate from your encryption passphrase.</Muted>
-          <Field value={email} onChangeText={setEmail} placeholder="Email" />
-          <Field value={password} onChangeText={setPassword} placeholder="Password" secureTextEntry />
-          <Button label={busy ?? "Sign in"} onPress={signIn} loading={!!busy} />
-          <Button label="Create account" onPress={signUp} variant="outline" />
+      {!linked ? (
+        <Section icon="cloud-outline" title="Connect with safe words">
+          <Muted>
+            Your safe words are the only key to your cloud vault — no email, no account to manage.
+            Enter the same words on any device to access your files. Supabase only ever stores
+            encrypted data and never sees your safe words.
+          </Muted>
+          <Field value={safeWords} onChangeText={setSafeWords} placeholder="Your safe words" secureTextEntry />
+          <Button label={busy ?? "Connect & sync"} onPress={connect} loading={!!busy} />
         </Section>
       ) : (
-        <>
-          <Section icon="checkmark-circle-outline" title="Signed in">
-            <Muted>Account: {userId.slice(0, 8)}… {enabled ? "· cloud linked" : "· not linked yet"}</Muted>
-            <Button label="Sign out" onPress={signOut} variant="outline" />
-          </Section>
-
-          {!enabled ? (
-            <Section icon="lock-closed-outline" title="Encryption passphrase">
-              <Muted>
-                Sets (or links to) the zero-knowledge key that protects your files in the cloud.
-                Supabase never sees it. There&apos;s no recovery if you lose it — keep it safe.
-              </Muted>
-              <Field value={passphrase} onChangeText={setPassphrase} placeholder="Strong passphrase" secureTextEntry />
-              <Button label="Enable / link cloud" onPress={enableOrLink} loading={!!busy} />
-            </Section>
-          ) : (
-            <Section icon="sync-outline" title="Sync">
-              <Muted>Uploads new local items and pulls changes from your other devices.</Muted>
-              <Button label="Sync now" onPress={syncNow} loading={!!busy} />
-            </Section>
-          )}
-        </>
+        <Section icon="cloud-done-outline" title="Connected">
+          <Muted>This device is syncing. Use the same safe words on another device to access everything there.</Muted>
+          <Button label={busy ?? "Sync now"} onPress={syncNow} loading={!!busy} />
+          <Button label="Disconnect this device" variant="outline" onPress={disconnect} />
+        </Section>
       )}
 
       <Muted>
-        Files are encrypted on this device before upload (AES-256-GCM, per-file keys). Supabase stores
-        only ciphertext. Caching is opt-in per item; offline you can open only cached items.
+        Files are encrypted on this device before upload (AES-256-GCM, per-file keys). Caching is
+        opt-in per item; offline you can open only cached items. Keep your safe words safe — losing
+        them means losing cloud access.
       </Muted>
     </Panel>
   );

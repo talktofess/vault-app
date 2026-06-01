@@ -1,9 +1,10 @@
 # Cloud architecture — zero-knowledge Supabase sync
 
-Status: **design + Phase 1 (crypto core) in progress.** The local-first vault
-stays the source of truth on-device; Supabase is an additive, opportunistic
-sync + cross-device layer. Decisions locked: **zero-knowledge encryption**,
-**email + password** Supabase Auth, local-first.
+Status: **implemented.** The local-first vault stays the source of truth
+on-device; Supabase is an additive, opportunistic sync + cross-device layer.
+Decisions locked: **zero-knowledge encryption**, **safe-words-only identity**
+(no email/verification — the safe words derive a hidden Supabase account *and*
+the encryption key), local-first.
 
 ## Goals
 
@@ -27,12 +28,17 @@ Two secrets, two jobs:
 
 | Secret | Protects | Strength |
 | --- | --- | --- |
-| Account passphrase | cloud-stored wrapped DEK (zero-knowledge root) | strong; memory-hard KDF |
+| **Safe words** | the cloud — derive both the Supabase account (`src/cloud/account.ts`, domain-separated Argon2id) *and* the encryption KEK (zero-knowledge root) | strong; memory-hard KDF, no recovery |
 | 4-digit PIN | device-local DEK copy only | weak OK — device-bound + lockout, never touches cloud ciphertext |
-| Supabase Auth password | identity / RLS / transport only | normal; **not** an encryption key |
 
-The PIN never protects cloud data. The passphrase is entered once per device
-(first sign-in) and at passphrase change.
+The PIN never protects cloud data. The safe words are the single cloud key:
+enter them on any device to sign in and decrypt. There's **no email and no
+verification** — the derived Supabase account is invisible plumbing, so the
+project must run with **email confirmations OFF** (synthetic addresses can't be
+confirmed). Because the auth password is `Argon2id(safe words)` (high-entropy,
+domain-separated from the KEK), a leaked Supabase auth hash is no easier to
+crack than the vault ciphertext — the safe words guard everything, so they must
+be strong.
 
 ## Postgres schema
 
@@ -138,19 +144,21 @@ would break zero-knowledge.
 1. **Create a Supabase project**, then in the SQL editor run
    `supabase/migrations/0001_init.sql` (schema + RLS + triggers + the private
    `vault` bucket and its policies). Idempotent — safe to re-run.
-2. **Auth:** Authentication → Providers → enable **Email**. (Optionally turn off
-   email confirmation during testing.)
-3. **Env:** copy `.env.example` to `.env` and fill in `EXPO_PUBLIC_SUPABASE_URL`
-   and `EXPO_PUBLIC_SUPABASE_ANON_KEY` from Settings → API.
-4. **Rebuild** the app (env vars inline at build time). With no env vars set the
-   app runs fully local and all cloud UI hides.
-5. **First device:** Settings → Cloud sync → create account → set a strong
-   **encryption passphrase** (the zero-knowledge root) → it pushes your local
-   items.
-6. **Another device:** install → on the onboarding screen tap **"Already have a
-   cloud vault? Restore"** → sign in → enter the same passphrase → choose a new
-   device PIN. The DEK is recovered locally and the metadata pulled; tap any
-   item to download it.
+2. **Auth:** Authentication → Providers → **Email** enabled, and **"Confirm
+   email" turned OFF** (required — the safe-words flow uses synthetic addresses
+   that can't be confirmed; leaving it on also triggers an email rate limit).
+3. **Env:** for local dev, copy `.env.example` to `.env` with
+   `EXPO_PUBLIC_SUPABASE_URL` + `EXPO_PUBLIC_SUPABASE_ANON_KEY` (Settings → API).
+   For **EAS** builds the same vars live in `eas.json` per profile; for **Vercel**
+   add them in Project → Settings → Environment Variables (the build is
+   `expo export --platform web`, which inlines `EXPO_PUBLIC_*` at build time).
+4. **Rebuild** the app. With no env vars set it runs fully local and cloud UI hides.
+5. **First device:** Settings → Cloud sync → enter your **safe words** →
+   **Connect & sync**. That's it — no email, no account screen.
+6. **Another device:** install → on the welcome screen tap **"Already have a
+   cloud vault? Restore"** → enter the **same safe words** → choose a new device
+   PIN. The key is recovered locally and metadata pulled; tap any item to
+   download it.
 
 ## Build status
 
