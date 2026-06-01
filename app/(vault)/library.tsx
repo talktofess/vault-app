@@ -2,8 +2,9 @@
 // audio, documents, APKs, archives, notes, anything. Browse with search +
 // type filters + sort, import from anywhere, open type-aware previews, and
 // manage in bulk (multi-select delete / export / move-to-album).
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   Image,
@@ -26,6 +27,7 @@ import { makeViewableUri, releaseViewableUri, saveBytes } from "../../src/platfo
 import { compressImage, readFileBytes, deleteFromGallery } from "../../src/platform/media";
 import { readBytesFromUri } from "../../src/platform/io";
 import { streamRemoteToUri } from "../../src/platform/streamMedia";
+import { syncIfLinked } from "../../src/cloud/autosync";
 import { bytesToUtf8, utf8ToBytes } from "../../src/crypto/b64";
 import {
   CATEGORY_COLOR,
@@ -57,6 +59,8 @@ export default function Library() {
 
   const [importMenu, setImportMenu] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const syncingRef = useRef(false); // guards against overlapping syncs
 
   const [preview, setPreview] = useState<Preview | null>(null);
   const [textView, setTextView] = useState<TextView | null>(null);
@@ -68,7 +72,13 @@ export default function Library() {
     if (unlocked) setItems(vault.listItems().filter((i) => i.type !== "credential"));
   }, [vault, unlocked]);
 
-  useFocusEffect(useCallback(() => refresh(), [refresh]));
+  useFocusEffect(
+    useCallback(() => {
+      refresh();
+      void runSync(true); // opportunistic background sync on entering the Library
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [refresh])
+  );
 
   // ---- derived list: filter + search + sort ----
   const visible = useMemo(() => {
@@ -116,6 +126,7 @@ export default function Library() {
         if (asset.assetId) assetIds.push(asset.assetId);
       }
       refresh();
+      void runSync(true); // auto-upload new items when cloud is linked
       if (assetIds.length > 0) {
         Alert.alert("Remove originals?", "Delete the imported items from your device gallery? They're safely stored here.", [
           { text: "Keep", style: "cancel" },
@@ -146,6 +157,7 @@ export default function Library() {
         await vault.addItem("file", asset.name, bytes, { mime });
       }
       refresh();
+      void runSync(true);
     } catch (e) {
       Alert.alert("Import failed", e instanceof Error ? e.message : "Could not import.");
     } finally {
@@ -239,28 +251,29 @@ export default function Library() {
     }
   }
 
-  async function sync() {
-    if (!cloud) return;
-    setBusy("Syncing…");
-    try {
-      const uid = await cloud.auth.currentUserId();
-      if (!uid) {
-        Alert.alert("Not signed in", "Open Settings → Cloud sync to sign in.");
-        return;
+  // Push new local items + pull remote changes. silent = used for automatic
+  // background syncs (on focus / after import); loud = the manual Sync button.
+  const runSync = useCallback(
+    async (silent: boolean) => {
+      if (!cloud || syncingRef.current) return;
+      syncingRef.current = true;
+      setSyncing(true);
+      try {
+        const res = await syncIfLinked(vault, cloud);
+        if (res) refresh();
+        if (!silent) {
+          if (!res) Alert.alert("Cloud not linked", "Open Settings → Cloud sync to sign in and link this device.");
+          else Alert.alert("Synced", `Pushed ${res.pushed}, pulled ${res.added} new, removed ${res.removed}.`);
+        }
+      } catch (e) {
+        if (!silent) Alert.alert("Sync failed", e instanceof Error ? e.message : "Failed.");
+      } finally {
+        syncingRef.current = false;
+        setSyncing(false);
       }
-      if (!(await vault.cloudEnabled(cloud.store))) {
-        Alert.alert("Cloud not linked", "Open Settings → Cloud sync to link this device.");
-        return;
-      }
-      await vault.pushAll(cloud.store, uid);
-      await vault.pull(cloud.store);
-      refresh();
-    } catch (e) {
-      Alert.alert("Sync failed", e instanceof Error ? e.message : "Failed.");
-    } finally {
-      setBusy(null);
-    }
-  }
+    },
+    [cloud, vault, refresh]
+  );
 
   async function closePreview() {
     if (preview) await preview.release();
@@ -291,6 +304,7 @@ export default function Library() {
     await vault.addItem("note", name || "Untitled", utf8ToBytes(body), { isJson: json });
     setNoteEdit(null);
     refresh();
+    void runSync(true);
   }
 
   // ---- selection ----
@@ -358,8 +372,12 @@ export default function Library() {
         <Title>Vault</Title>
         <View style={{ flexDirection: "row", gap: 16, alignItems: "center" }}>
           {cloud && !selectMode && (
-            <Pressable onPress={sync} hitSlop={8}>
-              <Ionicons name="sync" size={20} color={theme.accent} />
+            <Pressable onPress={() => runSync(false)} hitSlop={8} disabled={syncing}>
+              {syncing ? (
+                <ActivityIndicator size="small" color={theme.accent} />
+              ) : (
+                <Ionicons name="sync" size={20} color={theme.accent} />
+              )}
             </Pressable>
           )}
           <Pressable onPress={() => setSort(sort === "new" ? "name" : sort === "name" ? "size" : "new")}>

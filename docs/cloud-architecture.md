@@ -161,9 +161,11 @@ would break zero-knowledge.
   and covered by a two-device integration test using in-memory fakes.
 - **Phase 3 — UI:** ✅ Cloud sync screen (auth + passphrase + sync), Library
   cloud/cached badges, per-item Download / Remove-download, sync button,
-  delete-everywhere, and a **Restore-from-cloud** onboarding flow for
-  bootstrapping a fresh device (VaultService.restoreFromCloud /
-  checkCloudPassphrase, covered by integration tests).
+  delete-everywhere, a **Restore-from-cloud** onboarding flow for bootstrapping
+  a fresh device (VaultService.restoreFromCloud / checkCloudPassphrase), and
+  **automatic background sync** (`src/cloud/autosync.ts`) — opportunistic
+  push+pull on entering the Library and after each import, no-op unless signed
+  in and linked. All covered by integration tests.
 - **Phase 4 — streaming player:** ✅ (with caveats) `src/cloud/stream.ts`
   `StreamReader` fetches + decrypts chunk-by-chunk over HTTP Range (tested:
   reconstruction, seek, range-only, tamper). `VaultService.openRemoteStream`

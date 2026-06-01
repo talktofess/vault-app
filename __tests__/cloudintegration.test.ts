@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { VaultService, __setClock } from "../src/vault/VaultService";
 import { MemoryKeychain, MemoryStorage } from "../src/vault/memoryPorts";
 import { bytesToUtf8, utf8ToBytes } from "../src/crypto/b64";
+import { syncIfLinked } from "../src/cloud/autosync";
 import type { CloudStore } from "../src/cloud/ports";
 import type { RemoteItem, VaultKeysRow } from "../src/cloud/types";
 
@@ -168,5 +169,25 @@ describe("cloud sync across two devices", () => {
     const b = new VaultService(new MemoryStorage(), new MemoryKeychain());
     await expect(b.restoreFromCloud(store, "wrong-pass", "0000")).rejects.toThrow();
     expect(await b.exists()).toBe(false); // nothing was created
+  });
+
+  it("syncIfLinked is a no-op until signed in AND linked, then pushes + pulls", async () => {
+    const { store } = fakeCloud();
+    const v = new VaultService(new MemoryStorage(), new MemoryKeychain());
+    await v.create("1234");
+    await v.addItem("file", "x.bin", utf8ToBytes("x"));
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const signedOut = { auth: { currentUserId: async () => null }, store } as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const signedIn = { auth: { currentUserId: async () => USER }, store } as any;
+
+    expect(await syncIfLinked(v, null)).toBeNull(); // no cloud configured
+    expect(await syncIfLinked(v, signedOut)).toBeNull(); // signed out
+    expect(await syncIfLinked(v, signedIn)).toBeNull(); // signed in but not linked
+
+    await v.enableCloud(store, "pass-pass");
+    const res = await syncIfLinked(v, signedIn); // linked -> actually syncs
+    expect(res?.pushed).toBe(1);
   });
 });
