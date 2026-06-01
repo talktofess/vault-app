@@ -13,18 +13,23 @@ import { AppState, Platform } from "react-native";
 import { VaultService } from "../vault/VaultService";
 import { ExpoStorage } from "../platform/expoStorage";
 import { ExpoKeychain } from "../platform/expoKeychain";
+import { createSupabase, type Supabase } from "../cloud/supabase";
 
 interface VaultCtx {
   vault: VaultService;
   unlocked: boolean;
   setUnlocked: (v: boolean) => void;
   lock: () => void;
+  // The Supabase handle, or null when cloud env vars aren't configured
+  // (the app then runs purely local — every cloud UI affordance hides).
+  cloud: Supabase | null;
 }
 
 const Ctx = createContext<VaultCtx | null>(null);
 
 export function VaultProvider({ children }: { children: React.ReactNode }) {
   const vault = useMemo(() => new VaultService(new ExpoStorage(), new ExpoKeychain()), []);
+  const cloud = useMemo(() => createSupabase(), []);
   const [unlocked, setUnlockedState] = useState(false);
 
   const lock = useCallback(() => {
@@ -52,7 +57,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     return () => sub.remove();
   }, [lock]);
 
-  const value: VaultCtx = { vault, unlocked, setUnlocked, lock };
+  const value: VaultCtx = { vault, unlocked, setUnlocked, lock, cloud };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

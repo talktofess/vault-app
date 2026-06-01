@@ -30,6 +30,8 @@ export default function VaultTabs() {
       <Tabs.Screen name="media" options={{ href: null, title: "Media" }} />
       <Tabs.Screen name="notes" options={{ href: null, title: "Notes" }} />
       <Tabs.Screen name="files" options={{ href: null, title: "Files" }} />
+      {/* reachable from Settings via router.push, not a tab */}
+      <Tabs.Screen name="cloud" options={{ href: null, title: "Cloud sync" }} />
       <Tabs.Screen
         name="passwords"
         options={{

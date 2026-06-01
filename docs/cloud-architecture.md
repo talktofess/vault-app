@@ -133,12 +133,39 @@ would break zero-knowledge.
 - Key rotation is cheap: new passphrase re-wraps DEK; DEK rotation re-wraps
   every `wrapped_fk` + `enc_meta` (metadata only, no blob re-encryption).
 
-## Phases
+## Setup (apply this to go live)
 
-1. **Crypto core (this phase):** `argon2.ts`, `keys.ts` (wrap/unwrap + wire
-   format), `chunkCipher.ts` (chunked file enc/dec + range math), with tests.
-   No Supabase calls.
-2. Supabase client + sync engine (auth, pull/push, resumable upload, range
-   download decryptor).
-3. UI: cloud/cached badges, cache toggle, passphrase setup, sync status.
-4. Web MSE player / native decrypt-server.
+1. **Create a Supabase project**, then in the SQL editor run
+   `supabase/migrations/0001_init.sql` (schema + RLS + triggers + the private
+   `vault` bucket and its policies). Idempotent — safe to re-run.
+2. **Auth:** Authentication → Providers → enable **Email**. (Optionally turn off
+   email confirmation during testing.)
+3. **Env:** copy `.env.example` to `.env` and fill in `EXPO_PUBLIC_SUPABASE_URL`
+   and `EXPO_PUBLIC_SUPABASE_ANON_KEY` from Settings → API.
+4. **Rebuild** the app (env vars inline at build time). With no env vars set the
+   app runs fully local and all cloud UI hides.
+5. In the app: **Settings → Cloud sync** → sign in / create account → set a
+   strong **encryption passphrase** (the zero-knowledge root) → it pushes your
+   local items. On another device: install, unlock, Cloud sync → sign in → enter
+   the same passphrase to link, then **Sync**.
+
+## Build status
+
+- **Phase 1 — crypto core:** ✅ `argon2.ts`, `keys.ts`, `chunkCipher.ts` + tests.
+- **Phase 2 — sync engine + Supabase adapter:** ✅ `src/cloud/*` (ports, codec,
+  keyflows, supabase adapter), `VaultService` cloud methods (enableCloud,
+  push/pull, cache/uncache, deleteEverywhere), all behind the `CloudStore` port
+  and covered by a two-device integration test using in-memory fakes.
+- **Phase 3 — UI:** ✅ Cloud sync screen (auth + passphrase + sync), Library
+  cloud/cached badges, per-item Download / Remove-download, sync button,
+  delete-everywhere.
+- **Phase 4 — streaming player:** ⏳ chunk format + `downloadRange` are in place;
+  the progressive web (MSE) / native (loopback decrypt) players are the
+  remaining work. Today, opening an uncached item streams it transiently
+  (download-decrypt) and "Download" caches it for offline.
+
+### Not yet verified live
+The crypto and sync logic are unit + integration tested locally, but the
+Supabase **network** path (adapter against a real project, RN session
+persistence, range requests) hasn't been exercised against a live backend —
+do that after applying the migration and setting env vars.

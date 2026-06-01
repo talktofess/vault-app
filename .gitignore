@@ -10,3 +10,6 @@ test-out.txt
 vault-backup-*.json
 
 .vercel
+
+# local Supabase credentials (commit .env.example instead)
+.env

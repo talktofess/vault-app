@@ -11,7 +11,7 @@ import { readTextFromUri, saveText } from "../../src/platform/io";
 import { biometricHardwareAvailable, promptBiometric } from "../../src/platform/expoKeychain";
 
 export default function Settings() {
-  const { vault, lock, setUnlocked } = useVault();
+  const { vault, lock, setUnlocked, cloud } = useVault();
   const [bioOn, setBioOn] = useState(false);
   const [bioHw, setBioHw] = useState(false);
   const [backupPw, setBackupPw] = useState("");
@@ -102,7 +102,7 @@ export default function Settings() {
       setRestoreBackupPw("");
       setUnlocked(true);
       Alert.alert("Restored", "Your backup has been restored.");
-      router.replace("/(vault)/media");
+      router.replace("/(vault)/library");
     } catch (e) {
       Alert.alert("Restore failed", e instanceof Error ? e.message : "Failed");
     } finally {
@@ -248,6 +248,17 @@ export default function Settings() {
           />
         </Section>
       )}
+
+      <Section icon="cloud-outline" title="Cloud sync">
+        {cloud ? (
+          <>
+            <Muted>Sync your vault across devices end-to-end encrypted. Caching is opt-in per item.</Muted>
+            <Button label="Open cloud sync" onPress={() => router.push("/(vault)/cloud")} variant="outline" />
+          </>
+        ) : (
+          <Muted>Not configured in this build (no Supabase env vars). The vault works fully offline.</Muted>
+        )}
+      </Section>
 
       <Section icon="cloud-upload-outline" title="Encrypted backup">
         <Muted>

@@ -23,6 +23,9 @@ import {
   type VaultItem,
   type VaultManifest,
 } from "./types";
+import type { CloudStore } from "../cloud/ports";
+import { buildVaultKeys, recoverDek } from "../cloud/keyflows";
+import { decodeFk, decodeMeta, decodeObject, encodeItem } from "../cloud/codec";
 
 const BIO_KEY = "vault.dek"; // keychain entry holding the DEK for biometric unlock
 
@@ -67,10 +70,20 @@ export class VaultService {
 
   /** First-run: set the master password, generate the DEK, write the manifest. */
   async create(password: string): Promise<void> {
+    await this.createWithDek(password, randomBytes(32));
+  }
+
+  /**
+   * Like create(), but wraps a SPECIFIC DEK under the new PIN. Used when
+   * bootstrapping a new device from the cloud: the account DEK is recovered
+   * with the passphrase, then re-wrapped here under a fresh local PIN so the
+   * device shares the one vault key. Starts with an empty local index; items
+   * arrive via pull().
+   */
+  async createWithDek(password: string, dek: Uint8Array): Promise<void> {
     if (await this.exists()) throw new Error("Vault already exists");
     const salt = randomBytes(SALT_LEN);
     const mk = deriveKey(password, salt);
-    const dek = randomBytes(32);
     const manifest: VaultManifest = {
       version: 1,
       kdf: { salt: toB64(salt), iterations: KDF_ITERATIONS },
@@ -468,6 +481,178 @@ export class VaultService {
     await this.storage.writeManifest(JSON.stringify(manifest));
     this.dek = dek;
     await this.loadIndex();
+  }
+
+  // ---- cloud sync (zero-knowledge; see docs/cloud-architecture.md) ----
+  //
+  // The DEK never leaves this object: enableCloud wraps it under the passphrase,
+  // pushItem encrypts items under per-file keys, and pull only learns metadata.
+  // Caching is explicit (cacheItem); offline you can read only cached items.
+
+  /** Recover the account DEK from the cloud key-set (new-device bootstrap). */
+  static async recoverDekFromCloud(cloud: CloudStore, passphrase: string): Promise<Uint8Array> {
+    const keys = await cloud.getVaultKeys();
+    if (!keys) throw new Error("No cloud vault to bootstrap from");
+    return recoverDek(keys, passphrase);
+  }
+
+  /** Publish this vault's DEK wrapped under the account passphrase (enable cloud). */
+  async enableCloud(cloud: CloudStore, passphrase: string): Promise<void> {
+    this.requireUnlocked();
+    if (this.decoy) throw new Error("Cannot enable cloud from the decoy vault");
+    await cloud.putVaultKeys(buildVaultKeys(this.dek!, passphrase));
+  }
+
+  async cloudEnabled(cloud: CloudStore): Promise<boolean> {
+    return (await cloud.getVaultKeys()) !== null;
+  }
+
+  /**
+   * Does the passphrase recover a DEK equal to this device's DEK? Used before
+   * linking: if the account already has a cloud vault under a DIFFERENT key,
+   * pushing local items would corrupt the set, so the UI must refuse.
+   */
+  async cloudKeyMatchesLocal(cloud: CloudStore, passphrase: string): Promise<boolean> {
+    this.requireUnlocked();
+    const keys = await cloud.getVaultKeys();
+    if (!keys) return false;
+    try {
+      const dek = recoverDek(keys, passphrase);
+      if (dek.length !== this.dek!.length) return false;
+      let diff = 0;
+      for (let i = 0; i < dek.length; i++) diff |= dek[i] ^ this.dek![i];
+      return diff === 0;
+    } catch {
+      return false;
+    }
+  }
+
+  private nowIso(): string {
+    return new Date(nowMs()).toISOString();
+  }
+
+  /** Encrypt + upload one local item to the cloud and record the remote ref. */
+  async pushItem(cloud: CloudStore, userId: string, id: string): Promise<void> {
+    this.requireUnlocked();
+    const item = this.index!.items.find((i) => i.id === id);
+    if (!item) throw new Error("Item not found");
+    const plain = await this.readItem(id);
+    const { object, row } = encodeItem(
+      this.dek!,
+      userId,
+      id,
+      { name: item.name, mime: item.mime, album: item.album, kind: item.type },
+      plain
+    );
+    await cloud.uploadObject(row.storagePath, object, "application/octet-stream");
+    const updatedAt = this.nowIso();
+    await cloud.upsertItem({
+      ...row,
+      createdAt: new Date(item.createdAt).toISOString(),
+      updatedAt, // server overrides via trigger; sent for fakes/back-compat
+      deletedAt: null,
+    });
+    item.remote = { path: row.storagePath, updatedAt, wrappedFk: row.wrappedFk, byteSize: row.byteSize };
+    item.cached = true;
+    await this.persistIndex();
+  }
+
+  /** Push every local item that isn't on the cloud yet. Returns the count pushed. */
+  async pushAll(cloud: CloudStore, userId: string): Promise<number> {
+    this.requireUnlocked();
+    const todo = this.index!.items.filter((i) => !i.remote);
+    for (const i of todo) await this.pushItem(cloud, userId, i.id);
+    return todo.length;
+  }
+
+  /** Pull metadata changes since the last cursor. Does NOT download blobs. */
+  async pull(cloud: CloudStore): Promise<{ added: number; removed: number }> {
+    this.requireUnlocked();
+    const rows = await cloud.listItemsSince(this.index!.syncCursor ?? null);
+    let added = 0;
+    let removed = 0;
+    for (const row of rows) {
+      const existing = this.index!.items.find((i) => i.id === row.id);
+      if (row.deletedAt) {
+        if (existing) {
+          await this.storage.deleteBlob(row.id);
+          this.index!.items = this.index!.items.filter((i) => i.id !== row.id);
+          removed++;
+        }
+      } else {
+        const meta = decodeMeta(this.dek!, row.encMeta);
+        const ref = { path: row.storagePath, updatedAt: row.updatedAt, wrappedFk: row.wrappedFk, byteSize: row.byteSize };
+        if (existing) {
+          existing.name = meta.name;
+          existing.mime = meta.mime;
+          existing.album = meta.album;
+          existing.size = meta.plainSize;
+          existing.remote = ref;
+        } else {
+          this.index!.items.push({
+            id: row.id,
+            type: (meta.kind as ItemType) ?? "file",
+            name: meta.name,
+            size: meta.plainSize,
+            mime: meta.mime,
+            album: meta.album,
+            createdAt: Date.parse(row.createdAt) || nowMs(),
+            remote: ref,
+            cached: false,
+          });
+          added++;
+        }
+      }
+      this.index!.syncCursor = row.updatedAt;
+    }
+    await this.persistIndex();
+    return { added, removed };
+  }
+
+  /** Whether the item's encrypted blob is present on this device. */
+  isCached(id: string): boolean {
+    const item = this.index!.items.find((i) => i.id === id);
+    return !!item && item.cached !== false;
+  }
+
+  /** Download + decrypt a remote item's bytes WITHOUT persisting (transient view). */
+  async fetchRemoteBytes(cloud: CloudStore, id: string): Promise<Uint8Array> {
+    this.requireUnlocked();
+    const item = this.index!.items.find((i) => i.id === id);
+    if (!item?.remote) throw new Error("No cloud copy");
+    const object = await cloud.downloadObject(item.remote.path);
+    return decodeObject(decodeFk(this.dek!, item.remote.wrappedFk), object);
+  }
+
+  /** Persist a remote item's blob locally (explicit opt-in caching). */
+  async cacheItem(cloud: CloudStore, id: string): Promise<void> {
+    this.requireUnlocked();
+    const item = this.index!.items.find((i) => i.id === id);
+    if (!item?.remote) throw new Error("No cloud copy to cache");
+    const plain = await this.fetchRemoteBytes(cloud, id);
+    await this.storage.writeBlob(id, utf8ToBytes(JSON.stringify(seal(this.dek!, plain))));
+    item.cached = true;
+    await this.persistIndex();
+  }
+
+  /** Drop the local blob but keep the cloud copy. Refuses if there's no cloud copy. */
+  async uncacheItem(id: string): Promise<void> {
+    this.requireUnlocked();
+    const item = this.index!.items.find((i) => i.id === id);
+    if (!item) return;
+    if (!item.remote) throw new Error("Refusing to uncache: no cloud copy exists");
+    await this.storage.deleteBlob(id);
+    item.cached = false;
+    await this.persistIndex();
+  }
+
+  /** Delete everywhere: cloud row tombstoned, object removed, local blob gone. */
+  async deleteEverywhere(cloud: CloudStore, id: string): Promise<void> {
+    this.requireUnlocked();
+    const item = this.index!.items.find((i) => i.id === id);
+    await cloud.markDeleted(id, this.nowIso());
+    if (item?.remote) await cloud.removeObject(item.remote.path).catch(() => {});
+    await this.deleteItem(id);
   }
 
   // ---- danger ----

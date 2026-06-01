@@ -45,7 +45,7 @@ type TextView = { item: VaultItem; body: string };
 type AlbumTarget = { ids: string[] };
 
 export default function Library() {
-  const { vault, unlocked } = useVault();
+  const { vault, unlocked, cloud } = useVault();
   const [items, setItems] = useState<VaultItem[]>([]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<FileCategory | "all">("all");
@@ -162,27 +162,89 @@ export default function Library() {
     router.push("/(vault)/camera");
   }
 
+  // Read an item's bytes: from the local cache if present, otherwise stream the
+  // cloud copy transiently (viewing an uncached item does NOT persist it —
+  // caching is the explicit "Download" action).
+  async function readBytes(item: VaultItem): Promise<Uint8Array> {
+    if (vault.isCached(item.id) || !item.remote) return vault.readItem(item.id);
+    if (!cloud) throw new Error("This item isn't downloaded and cloud isn't configured.");
+    return vault.fetchRemoteBytes(cloud.store, item.id);
+  }
+
   // ---- open (type-aware) ----
   async function open(item: VaultItem) {
     const cat = categorize(item);
+    const needsFetch = item.remote && !vault.isCached(item.id);
     try {
+      if (needsFetch) setBusy("Fetching from cloud…");
       if (item.type === "note") {
-        setNoteEdit({ item, name: item.name, body: bytesToUtf8(await vault.readItem(item.id)), json: !!item.isJson });
+        setNoteEdit({ item, name: item.name, body: bytesToUtf8(await readBytes(item)), json: !!item.isJson });
         return;
       }
       if (cat === "image" || cat === "video" || cat === "audio") {
-        const data = await vault.readItem(item.id);
+        const data = await readBytes(item);
         const uri = await makeViewableUri(item.id, data, viewExt(item));
         setPreview({ uri, item, av: cat !== "image" });
         return;
       }
       if (isTextLike(cat, item.name, item.mime)) {
-        setTextView({ item, body: bytesToUtf8(await vault.readItem(item.id)) });
+        setTextView({ item, body: bytesToUtf8(await readBytes(item)) });
         return;
       }
       setDetails(item);
     } catch (e) {
       Alert.alert("Couldn't open", e instanceof Error ? e.message : "Failed to read item.");
+    } finally {
+      if (needsFetch) setBusy(null);
+    }
+  }
+
+  // ---- cloud actions ----
+  async function cacheItem(item: VaultItem) {
+    if (!cloud || !item.remote) return;
+    setBusy("Downloading…");
+    try {
+      await vault.cacheItem(cloud.store, item.id);
+      refresh();
+    } catch (e) {
+      Alert.alert("Download failed", e instanceof Error ? e.message : "Could not cache.");
+    } finally {
+      setBusy(null);
+      setDetails(null);
+    }
+  }
+
+  async function uncacheItem(item: VaultItem) {
+    try {
+      await vault.uncacheItem(item.id);
+      refresh();
+    } catch (e) {
+      Alert.alert("Can't remove download", e instanceof Error ? e.message : "Failed.");
+    } finally {
+      setDetails(null);
+    }
+  }
+
+  async function sync() {
+    if (!cloud) return;
+    setBusy("Syncing…");
+    try {
+      const uid = await cloud.auth.currentUserId();
+      if (!uid) {
+        Alert.alert("Not signed in", "Open Settings → Cloud sync to sign in.");
+        return;
+      }
+      if (!(await vault.cloudEnabled(cloud.store))) {
+        Alert.alert("Cloud not linked", "Open Settings → Cloud sync to link this device.");
+        return;
+      }
+      await vault.pushAll(cloud.store, uid);
+      await vault.pull(cloud.store);
+      refresh();
+    } catch (e) {
+      Alert.alert("Sync failed", e instanceof Error ? e.message : "Failed.");
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -193,7 +255,7 @@ export default function Library() {
 
   async function exportItem(item: VaultItem) {
     try {
-      const data = await vault.readItem(item.id);
+      const data = await readBytes(item);
       await saveBytes(item.name, item.mime, data);
     } catch (e) {
       Alert.alert("Export failed", e instanceof Error ? e.message : "Could not export.");
@@ -235,13 +297,21 @@ export default function Library() {
   }
 
   function deleteIds(ids: string[]) {
-    Alert.alert("Delete", `Delete ${ids.length} item${ids.length === 1 ? "" : "s"}? This can't be undone.`, [
+    const anyRemote = cloud && ids.some((id) => items.find((i) => i.id === id)?.remote);
+    const msg = anyRemote
+      ? `Delete ${ids.length} item${ids.length === 1 ? "" : "s"} everywhere — this device AND the cloud? This can't be undone.`
+      : `Delete ${ids.length} item${ids.length === 1 ? "" : "s"}? This can't be undone.`;
+    Alert.alert("Delete", msg, [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete",
         style: "destructive",
         onPress: async () => {
-          for (const id of ids) await vault.deleteItem(id);
+          for (const id of ids) {
+            const it = items.find((i) => i.id === id);
+            if (it?.remote && cloud) await vault.deleteEverywhere(cloud.store, id);
+            else await vault.deleteItem(id);
+          }
           clearSelect();
           setDetails(null);
           refresh();
@@ -273,6 +343,11 @@ export default function Library() {
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
         <Title>Vault</Title>
         <View style={{ flexDirection: "row", gap: 16, alignItems: "center" }}>
+          {cloud && !selectMode && (
+            <Pressable onPress={sync} hitSlop={8}>
+              <Ionicons name="sync" size={20} color={theme.accent} />
+            </Pressable>
+          )}
           <Pressable onPress={() => setSort(sort === "new" ? "name" : sort === "name" ? "size" : "new")}>
             <Text style={{ color: theme.accent, fontWeight: "600" }}>
               {sort === "new" ? "Newest" : sort === "name" ? "A–Z" : "Largest"}
@@ -368,6 +443,13 @@ export default function Library() {
                     {item.album ? ` · ${item.album}` : ""}
                   </Text>
                 </View>
+                {item.remote && (
+                  <Ionicons
+                    name={item.cached === false ? "cloud-outline" : "cloud-done-outline"}
+                    size={16}
+                    color={item.cached === false ? theme.muted : theme.good}
+                  />
+                )}
                 {selectMode ? (
                   <Ionicons
                     name={isSel ? "checkmark-circle" : "ellipse-outline"}
@@ -498,6 +580,12 @@ export default function Library() {
             </Text>
             <SheetRow icon="open-outline" label="Open" onPress={() => { const d = details; setDetails(null); d && open(d); }} />
             <SheetRow icon="share-outline" label="Export" onPress={() => { const d = details; setDetails(null); d && exportItem(d); }} />
+            {details.remote && details.cached === false && (
+              <SheetRow icon="cloud-download-outline" label="Download (cache offline)" sub="Keep a copy on this device" onPress={() => cacheItem(details)} />
+            )}
+            {details.remote && details.cached !== false && (
+              <SheetRow icon="cloud-done-outline" label="Remove download" sub="Frees space; stays in the cloud" onPress={() => uncacheItem(details)} />
+            )}
             <SheetRow icon="albums-outline" label="Move to album" onPress={() => setAlbumTarget({ ids: [details.id] })} />
             <SheetRow icon="trash-outline" label="Delete" danger onPress={() => deleteIds([details.id])} />
           </>

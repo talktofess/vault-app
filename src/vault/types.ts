@@ -11,6 +11,15 @@ export interface Credential {
   notes?: string;
 }
 
+// Pointer to an item's cloud copy. Present once the item has been pushed to (or
+// pulled from) Supabase. wrappedFk lets this device decrypt the cloud object.
+export interface RemoteRef {
+  path: string; // Storage object path 'userId/itemId.enc'
+  updatedAt: string; // server ISO timestamp (drives the sync cursor)
+  wrappedFk: string; // packed b64 of GCM(DEK, FK)
+  byteSize: number; // ciphertext object size
+}
+
 export interface VaultItem {
   id: string;
   type: ItemType;
@@ -24,6 +33,9 @@ export interface VaultItem {
   sourceUrl?: string;
   // Optional album/folder for organization.
   album?: string;
+  // ---- cloud sync (optional; absent on a purely-local item) ----
+  remote?: RemoteRef; // set when a cloud copy exists
+  cached?: boolean; // false = pulled-but-not-downloaded; undefined/true = blob is on-device
 }
 
 // Plaintext metadata, readable BEFORE unlock. Reveals nothing about content —
@@ -54,6 +66,8 @@ export interface VaultManifest {
 // The item index, stored ENCRYPTED under the DEK (so even names are private).
 export interface VaultIndex {
   items: VaultItem[];
+  // High-water mark for incremental cloud pulls (max server updatedAt seen).
+  syncCursor?: string;
 }
 
 // A portable, password-protected backup of the whole vault.
