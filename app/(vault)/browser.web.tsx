@@ -25,16 +25,11 @@ export default function BrowserWeb() {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
 
-  async function fetchBytes(target: string): Promise<{ bytes: Uint8Array; mime?: string }> {
-    const res = await fetch(target);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  async function readStream(res: Response): Promise<{ bytes: Uint8Array; mime?: string }> {
     const mime = res.headers.get("content-type") || undefined;
     const total = Number(res.headers.get("content-length")) || 0;
     const reader = res.body?.getReader();
-    if (!reader) {
-      const buf = new Uint8Array(await res.arrayBuffer());
-      return { bytes: buf, mime };
-    }
+    if (!reader) return { bytes: new Uint8Array(await res.arrayBuffer()), mime };
     const chunks: Uint8Array[] = [];
     let received = 0;
     for (;;) {
@@ -57,6 +52,27 @@ export default function BrowserWeb() {
     return { bytes, mime };
   }
 
+  // Try the server proxy first (fetches server-side, bypassing CORS), then fall
+  // back to a direct browser fetch (works for CORS-friendly hosts, and for local
+  // dev where the /api function isn't deployed).
+  async function fetchBytes(target: string): Promise<{ bytes: Uint8Array; mime?: string }> {
+    const sources = [`/api/grab?url=${encodeURIComponent(target)}`, target];
+    let lastErr: unknown;
+    for (const src of sources) {
+      try {
+        const res = await fetch(src);
+        if (!res.ok) {
+          lastErr = new Error(`HTTP ${res.status}`);
+          continue;
+        }
+        return await readStream(res);
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw lastErr instanceof Error ? lastErr : new Error("Could not fetch this URL.");
+  }
+
   async function download() {
     const target = url.trim();
     if (!/^https?:\/\//i.test(target)) {
@@ -77,7 +93,7 @@ export default function BrowserWeb() {
       Alert.alert(
         "Download failed",
         /Failed to fetch|NetworkError|CORS/i.test(msg)
-          ? "That host blocks cross-origin downloads (CORS), so the browser can't fetch it. Direct file links from CORS-friendly hosts work; DRM/streaming sites won't."
+          ? "Couldn't fetch that link. Direct file URLs work (the proxy bypasses CORS); pages that need a login, or DRM/streaming sites (YouTube, etc.), won't — grab those from the phone app's in-app browser."
           : msg
       );
     } finally {
@@ -90,10 +106,11 @@ export default function BrowserWeb() {
     <Screen>
       <Title>Download to vault</Title>
       <Muted>
-        Paste a direct link to a file or video. It&apos;s fetched by your browser and
-        stored encrypted in the vault — nothing goes through any server. Because the
-        web can&apos;t embed other sites, this works only for direct links from hosts that
-        allow cross-origin downloads; DRM/streaming sites (YouTube, etc.) won&apos;t.
+        Paste a direct link to a file or video — it&apos;s fetched (through a lightweight
+        proxy on this site, so cross-origin/CORS blocks don&apos;t matter), then stored
+        encrypted in the vault. The web can&apos;t embed and browse other sites, so
+        DRM/streaming pages (YouTube, etc.) still won&apos;t work here — use the phone
+        app&apos;s in-app browser for those.
       </Muted>
       <Field
         value={url}
