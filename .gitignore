@@ -13,3 +13,6 @@ vault-backup-*.json
 
 # local Supabase credentials (commit .env.example instead)
 .env
+
+# Supabase CLI scratch state
+supabase/.temp/
