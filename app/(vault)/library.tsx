@@ -18,12 +18,12 @@ import {
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { ResizeMode, Video } from "expo-av";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import { useVault } from "../../src/state/VaultContext";
 import { Button, Field, Muted, Screen, Title } from "../../src/ui/components";
 import { Markdown } from "../../src/ui/Markdown";
+import { VideoPlayer } from "../../src/ui/VideoPlayer";
 import { theme } from "../../src/ui/theme";
 import { makeViewableUri, releaseViewableUri, saveBytes } from "../../src/platform/io";
 import { compressImage, readFileBytes, deleteFromGallery } from "../../src/platform/media";
@@ -859,9 +859,7 @@ export default function Library() {
       <Modal visible={!!preview} onRequestClose={closePreview} animationType="fade">
         <View style={{ flex: 1, backgroundColor: "#000", justifyContent: "center" }}>
           {preview && !preview.av && <Image source={{ uri: preview.uri }} style={{ flex: 1 }} resizeMode="contain" />}
-          {preview && preview.av && (
-            <Video source={{ uri: preview.uri }} style={{ flex: 1 }} useNativeControls resizeMode={ResizeMode.CONTAIN} shouldPlay />
-          )}
+          {preview && preview.av && <VideoPlayer uri={preview.uri} onRequestNext={() => gotoAdjacent(1)} />}
 
           {/* title + position */}
           {preview && (
