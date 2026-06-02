@@ -1,6 +1,7 @@
 import { Platform, Pressable, Text, View } from "react-native";
-import { Tabs } from "expo-router";
+import { Redirect, Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { useVault } from "../../src/state/VaultContext";
 import { theme } from "../../src/ui/theme";
 
 const isWeb = Platform.OS === "web";
@@ -61,6 +62,12 @@ function SideRail({ state, navigation }: any) {
 }
 
 export default function VaultTabs() {
+  const { unlocked } = useVault();
+  // A direct page load (e.g. refreshing /library) starts locked with no key in
+  // memory — bounce to the gate so the user unlocks and their items load,
+  // instead of rendering an empty vault.
+  if (!unlocked) return <Redirect href="/" />;
+
   return (
     <Tabs
       tabBar={(props) => <SideRail {...props} />}

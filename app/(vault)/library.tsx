@@ -13,6 +13,7 @@ import {
   ScrollView,
   Switch,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
@@ -154,18 +155,40 @@ export default function Library() {
     if (res.canceled) return;
     setBusy("Importing media…");
     const assetIds: string[] = [];
+    let failed = 0;
     try {
       for (const asset of res.assets) {
-        // asset.type can be undefined on web — fall back to the mime type.
-        const isVideo = asset.type === "video" || (asset.mimeType?.startsWith("video") ?? false);
-        const bytes = isVideo ? await readFileBytes(asset.uri) : await compressImage(asset.uri);
-        const name = asset.fileName ?? `media_${Date.now()}`;
-        const mime = isVideo ? asset.mimeType ?? "video/mp4" : "image/jpeg";
-        await vault.addItem("media", name, bytes, { mime });
-        if (asset.assetId) assetIds.push(asset.assetId);
+        try {
+          const hint = `${asset.fileName ?? ""} ${asset.uri ?? ""}`.toLowerCase();
+          const isVideo =
+            asset.type === "video" ||
+            (asset.mimeType?.startsWith("video") ?? false) ||
+            /\.(mp4|mov|webm|m4v|mkv|avi|3gp)(\?|$)/.test(hint);
+          let bytes: Uint8Array;
+          let mime: string | undefined;
+          if (isVideo) {
+            bytes = await readFileBytes(asset.uri); // never canvas-compress a video
+            mime = asset.mimeType ?? "video/mp4";
+          } else {
+            // images are compressed; if that fails (e.g. odd format on web), store as-is
+            try {
+              bytes = await compressImage(asset.uri);
+              mime = "image/jpeg";
+            } catch {
+              bytes = await readFileBytes(asset.uri);
+              mime = asset.mimeType ?? "image/jpeg";
+            }
+          }
+          const name = asset.fileName ?? `media_${Date.now()}`;
+          await vault.addItem("media", name, bytes, { mime });
+          if (asset.assetId) assetIds.push(asset.assetId);
+        } catch {
+          failed++;
+        }
       }
       refresh();
       void runSync(true); // auto-upload new items when cloud is linked
+      if (failed > 0) Alert.alert("Some items skipped", `${failed} item${failed === 1 ? "" : "s"} couldn't be read and ${failed === 1 ? "was" : "were"} skipped.`);
       if (assetIds.length > 0) {
         Alert.alert("Remove originals?", "Delete the imported items from your device gallery? They're safely stored here.", [
           { text: "Keep", style: "cancel" },
@@ -184,19 +207,28 @@ export default function Library() {
     const res = await DocumentPicker.getDocumentAsync({ multiple: true, copyToCacheDirectory: true });
     if (res.canceled) return;
     setBusy("Importing files…");
+    let failed = 0;
     try {
       for (const asset of res.assets) {
-        const bytes = await readBytesFromUri(asset.uri);
-        // Infer the APK mime so Android offers "install" when this is exported.
-        const mime =
-          asset.mimeType ??
-          (asset.name.toLowerCase().endsWith(".apk")
-            ? "application/vnd.android.package-archive"
-            : undefined);
-        await vault.addItem("file", asset.name, bytes, { mime });
+        try {
+          const bytes = await readBytesFromUri(asset.uri);
+          // Infer the APK mime so Android offers "install" when this is exported.
+          const mime =
+            asset.mimeType ??
+            (asset.name.toLowerCase().endsWith(".apk")
+              ? "application/vnd.android.package-archive"
+              : undefined);
+          // Photos/videos/audio go in as media so they preview + thumbnail.
+          const m = mime ?? "";
+          const type = m.startsWith("image") || m.startsWith("video") || m.startsWith("audio") ? "media" : "file";
+          await vault.addItem(type, asset.name, bytes, { mime });
+        } catch {
+          failed++;
+        }
       }
       refresh();
       void runSync(true);
+      if (failed > 0) Alert.alert("Some files skipped", `${failed} file${failed === 1 ? "" : "s"} couldn't be read.`);
     } catch (e) {
       Alert.alert("Import failed", e instanceof Error ? e.message : "Could not import.");
     } finally {
@@ -215,16 +247,22 @@ export default function Library() {
     }
     if (!files.length) return;
     setBusy(`Importing ${files.length} file${files.length === 1 ? "" : "s"}…`);
+    let failed = 0;
     try {
       for (const f of files) {
-        const m = f.mime ?? "";
-        const type = m.startsWith("image") || m.startsWith("video") ? "media" : "file";
-        // preserve the folder layout: subfolders become the album
-        const dir = f.relPath.split("/").slice(0, -1).join(" / ");
-        await vault.addItem(type, f.name, f.bytes, { mime: f.mime, album: dir || undefined });
+        try {
+          const m = f.mime ?? "";
+          const type = m.startsWith("image") || m.startsWith("video") || m.startsWith("audio") ? "media" : "file";
+          // preserve the folder layout: subfolders become the album
+          const dir = f.relPath.split("/").slice(0, -1).join(" / ");
+          await vault.addItem(type, f.name, f.bytes, { mime: f.mime, album: dir || undefined });
+        } catch {
+          failed++;
+        }
       }
       refresh();
       void runSync(true);
+      Alert.alert("Folder imported", `Added ${files.length - failed} file${files.length - failed === 1 ? "" : "s"}${failed ? `, skipped ${failed}` : ""}.`);
     } catch (e) {
       Alert.alert("Import failed", e instanceof Error ? e.message : "Could not import the folder.");
     } finally {
@@ -583,18 +621,22 @@ export default function Library() {
                   paddingHorizontal: 14,
                 }}
               >
-                <View
-                  style={{
-                    width: 46,
-                    height: 46,
-                    borderRadius: 12,
-                    backgroundColor: CATEGORY_COLOR[cat] + "22",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <Ionicons name={CATEGORY_ICON[cat]} size={24} color={CATEGORY_COLOR[cat]} />
-                </View>
+                {cat === "image" && vault.isCached(item.id) ? (
+                  <Thumb item={item} getBytes={readBytes} />
+                ) : (
+                  <View
+                    style={{
+                      width: 46,
+                      height: 46,
+                      borderRadius: 12,
+                      backgroundColor: CATEGORY_COLOR[cat] + "22",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Ionicons name={CATEGORY_ICON[cat]} size={24} color={CATEGORY_COLOR[cat]} />
+                  </View>
+                )}
                 <View style={{ flex: 1 }}>
                   <Text numberOfLines={1} style={{ color: theme.text, fontWeight: "600" }}>
                     {item.name}
@@ -733,26 +775,41 @@ export default function Library() {
       <Modal visible={!!noteEdit} onRequestClose={() => setNoteEdit(null)} animationType="slide">
         {noteEdit && (
           <Screen>
-            <Title>{noteEdit.item ? "Edit note" : "New note"}</Title>
-            <Field value={noteEdit.name} onChangeText={(t) => setNoteEdit({ ...noteEdit, name: t })} placeholder="Title" />
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-              <Switch value={noteEdit.json} onValueChange={(v) => setNoteEdit({ ...noteEdit, json: v })} />
-              <Muted>JSON mode (validates on save)</Muted>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <Pressable onPress={() => setNoteEdit(null)} hitSlop={8}>
+                <Text style={{ color: theme.muted, fontSize: 16 }}>Cancel</Text>
+              </Pressable>
+              <Pressable onPress={() => setNoteEdit({ ...noteEdit, json: !noteEdit.json })} hitSlop={8} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Ionicons name={noteEdit.json ? "code-slash" : "code-slash-outline"} size={18} color={noteEdit.json ? theme.accent : theme.muted} />
+                <Text style={{ color: noteEdit.json ? theme.accent : theme.muted, fontSize: 13 }}>JSON</Text>
+              </Pressable>
+              <Pressable onPress={saveNote} hitSlop={8}>
+                <Text style={{ color: theme.accent, fontSize: 16, fontWeight: "700" }}>Save</Text>
+              </Pressable>
             </View>
-            <Field
+            <TextInput
+              value={noteEdit.name}
+              onChangeText={(t) => setNoteEdit({ ...noteEdit, name: t })}
+              placeholder="Title"
+              placeholderTextColor={theme.muted}
+              style={{ color: theme.text, fontSize: 22, fontWeight: "700", paddingVertical: 6 }}
+            />
+            <TextInput
               value={noteEdit.body}
               onChangeText={(t) => setNoteEdit({ ...noteEdit, body: t })}
-              placeholder={noteEdit.json ? '{ "key": "value" }' : "Your secure note…"}
+              placeholder={noteEdit.json ? '{\n  "key": "value"\n}' : "Start typing…"}
+              placeholderTextColor={theme.muted}
               multiline
+              autoFocus={!noteEdit.item}
+              textAlignVertical="top"
+              style={{
+                flex: 1,
+                color: theme.text,
+                fontSize: 17,
+                lineHeight: 25,
+                fontFamily: noteEdit.json ? "monospace" : undefined,
+              }}
             />
-            <View style={{ flexDirection: "row", gap: 10 }}>
-              <View style={{ flex: 1 }}>
-                <Button label="Save" onPress={saveNote} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Button label="Cancel" variant="outline" onPress={() => setNoteEdit(null)} />
-              </View>
-            </View>
           </Screen>
         )}
       </Modal>
@@ -820,6 +877,44 @@ function RenameModal({ item, onCancel, onSave }: { item: VaultItem | null; onCan
 }
 
 // ---- small presentational helpers ----
+
+// Lazy thumbnail for a cached/local image: decrypt to a viewable URI on mount,
+// release it on unmount. Falls back to an icon while loading / on failure.
+function Thumb({ item, getBytes }: { item: VaultItem; getBytes: (i: VaultItem) => Promise<Uint8Array> }) {
+  const [uri, setUri] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    let made: string | null = null;
+    (async () => {
+      try {
+        const data = await getBytes(item);
+        const u = await makeViewableUri(item.id + "_thumb", data, viewExt(item));
+        if (active) {
+          setUri(u);
+          made = u;
+        } else {
+          releaseViewableUri(u);
+        }
+      } catch {
+        /* show the icon fallback */
+      }
+    })();
+    return () => {
+      active = false;
+      if (made) releaseViewableUri(made);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item.id]);
+
+  if (!uri) {
+    return (
+      <View style={{ width: 46, height: 46, borderRadius: 12, backgroundColor: CATEGORY_COLOR.image + "22", alignItems: "center", justifyContent: "center" }}>
+        <Ionicons name="image" size={24} color={CATEGORY_COLOR.image} />
+      </View>
+    );
+  }
+  return <Image source={{ uri }} style={{ width: 46, height: 46, borderRadius: 12 }} resizeMode="cover" />;
+}
 
 function BarBtn({ icon, label, onPress, danger }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; danger?: boolean }) {
   return (
