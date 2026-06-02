@@ -517,6 +517,18 @@ export class VaultService {
     return keys ? recoverPin(keys, passphrase) : null;
   }
 
+  /**
+   * Seed the account's shared PIN from this device if it isn't set yet (e.g. a
+   * vault enabled before the shared-PIN feature). No-op once a PIN is stored.
+   */
+  async ensureSharedPin(cloud: CloudStore, passphrase: string): Promise<void> {
+    this.requireUnlocked();
+    if (this.decoy || !this.sessionPin) return;
+    const keys = await cloud.getVaultKeys();
+    if (!keys || keys.wrappedPin) return;
+    await cloud.putVaultKeys(buildVaultKeys(this.dek!, passphrase, undefined, this.sessionPin));
+  }
+
   async cloudEnabled(cloud: CloudStore): Promise<boolean> {
     return (await cloud.getVaultKeys()) !== null;
   }

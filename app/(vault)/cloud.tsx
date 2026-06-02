@@ -62,6 +62,9 @@ export default function Cloud() {
         // comes from the account, so no extra prompt is needed.
         setBusy("Merging this device…");
         await vault.adoptCloudVault(cloud!.store, safeWords.trim());
+      } else {
+        // Already the shared vault — make sure the account PIN is seeded.
+        await vault.ensureSharedPin(cloud!.store, safeWords.trim());
       }
       await finishSync(uid);
     } catch (e) {
