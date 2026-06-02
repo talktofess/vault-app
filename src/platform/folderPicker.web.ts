@@ -48,8 +48,15 @@ export async function pickFolder(): Promise<PickedFile[]> {
       }
     };
 
-    // The dialog firing no event = the user cancelled. Detect via window focus
-    // returning with no files, so the caller's spinner doesn't hang forever.
+    // Cancel handling so the caller's spinner never hangs: modern browsers fire
+    // a 'cancel' event; older ones only return window focus with no files.
+    input.addEventListener("cancel", () => {
+      if (!settled) {
+        settled = true;
+        cleanup();
+        resolve([]);
+      }
+    });
     const onFocus = () => {
       setTimeout(() => {
         if (!settled && (!input.files || input.files.length === 0)) {
@@ -57,7 +64,7 @@ export async function pickFolder(): Promise<PickedFile[]> {
           cleanup();
           resolve([]);
         }
-      }, 500);
+      }, 800);
     };
     window.addEventListener("focus", onFocus);
 

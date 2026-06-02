@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, View } from "react-native";
 import { router } from "expo-router";
 import { useVault } from "../src/state/VaultContext";
@@ -11,18 +11,23 @@ export default function Unlock() {
   const [pin, setPin] = useState("");
   const [busy, setBusy] = useState(false);
   const [hasBio, setHasBio] = useState(false);
+  const submitting = useRef(false); // re-entrancy guard (avoids the stale-busy race)
 
   useEffect(() => {
     vault.biometricAvailable().then(setHasBio);
   }, [vault]);
 
-  // Submit automatically once 4 digits are entered.
+  // Submit automatically once 4 digits are entered. The ref guard (not the
+  // `busy` state, which can be stale in this effect's closure) is what prevents
+  // a double-submit and the "correct PIN rejected after a wrong one" race.
   useEffect(() => {
-    if (pin.length === PIN_LENGTH && !busy) withPin(pin);
+    if (pin.length === PIN_LENGTH) void withPin(pin);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pin]);
 
   async function withPin(value: string) {
+    if (submitting.current) return;
+    submitting.current = true;
     setBusy(true);
     try {
       const wait = await vault.lockoutRemainingMs();
@@ -48,6 +53,7 @@ export default function Unlock() {
       setUnlocked(true);
       router.replace("/(vault)/library");
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }

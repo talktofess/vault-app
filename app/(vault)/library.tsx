@@ -55,6 +55,7 @@ export default function Library() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<FileCategory | "all">("all");
   const [sort, setSort] = useState<Sort>("new");
+  const [grid, setGrid] = useState(false);
 
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -489,6 +490,11 @@ export default function Library() {
               )}
             </Pressable>
           )}
+          {!selectMode && (
+            <Pressable onPress={() => setGrid((g) => !g)} hitSlop={8}>
+              <Ionicons name={grid ? "list-outline" : "grid-outline"} size={20} color={theme.accent} />
+            </Pressable>
+          )}
           <Pressable onPress={() => setSort(sort === "new" ? "name" : sort === "name" ? "size" : "new")}>
             <Text style={{ color: theme.accent, fontWeight: "600" }}>
               {sort === "new" ? "Newest" : sort === "name" ? "A–Z" : "Largest"}
@@ -500,7 +506,6 @@ export default function Library() {
         </View>
       </View>
 
-      {!selectMode && <Button label="+ Add to vault" onPress={() => setImportMenu(true)} />}
       <Field value={query} onChangeText={setQuery} placeholder="Search everything…" />
 
       {/* filter chips */}
@@ -598,11 +603,58 @@ export default function Library() {
         <FlatList
           data={visible}
           keyExtractor={(i) => i.id}
-          contentContainerStyle={{ gap: 8, paddingBottom: selectMode ? 90 : 40 }}
+          key={grid ? "grid" : "list"}
+          numColumns={grid ? 3 : 1}
+          columnWrapperStyle={grid ? { gap: 8 } : undefined}
+          contentContainerStyle={{ gap: 8, paddingBottom: selectMode ? 90 : 80 }}
           removeClippedSubviews
           renderItem={({ item }) => {
             const cat = categorize(item);
             const isSel = selected.has(item.id);
+            if (grid) {
+              return (
+                <Pressable
+                  onPress={() => (selectMode ? toggleSelect(item.id) : open(item))}
+                  onLongPress={() => !selectMode && startSelect(item.id)}
+                  style={{
+                    flex: 1 / 3,
+                    aspectRatio: 1,
+                    backgroundColor: theme.surface,
+                    borderRadius: theme.radius,
+                    borderWidth: 1,
+                    borderColor: isSel ? theme.accent : theme.border,
+                    overflow: "hidden",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  {cat === "image" && vault.isCached(item.id) ? (
+                    <Thumb item={item} getBytes={readBytes} fill />
+                  ) : (
+                    <Ionicons name={CATEGORY_ICON[cat]} size={36} color={CATEGORY_COLOR[cat]} />
+                  )}
+                  <View style={{ position: "absolute", left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.55)", paddingHorizontal: 6, paddingVertical: 4 }}>
+                    <Text numberOfLines={1} style={{ color: "#fff", fontSize: 10 }}>{item.name}</Text>
+                  </View>
+                  {item.remote && (
+                    <Ionicons
+                      name={item.cached === false ? "cloud-outline" : "cloud-done-outline"}
+                      size={14}
+                      color={item.cached === false ? "#fff" : theme.good}
+                      style={{ position: "absolute", top: 6, right: 6 }}
+                    />
+                  )}
+                  {selectMode && (
+                    <Ionicons
+                      name={isSel ? "checkmark-circle" : "ellipse-outline"}
+                      size={22}
+                      color={isSel ? theme.accent : "#fff"}
+                      style={{ position: "absolute", top: 6, left: 6 }}
+                    />
+                  )}
+                </Pressable>
+              );
+            }
             return (
               <Pressable
                 onPress={() => (selectMode ? toggleSelect(item.id) : open(item))}
@@ -668,6 +720,31 @@ export default function Library() {
             );
           }}
         />
+      )}
+
+      {/* compact floating add button */}
+      {!selectMode && (
+        <Pressable
+          onPress={() => setImportMenu(true)}
+          style={{
+            position: "absolute",
+            right: 18,
+            bottom: 22,
+            width: 58,
+            height: 58,
+            borderRadius: 29,
+            backgroundColor: theme.accent,
+            alignItems: "center",
+            justifyContent: "center",
+            shadowColor: "#000",
+            shadowOpacity: 0.4,
+            shadowRadius: 8,
+            shadowOffset: { width: 0, height: 4 },
+            elevation: 8,
+          }}
+        >
+          <Ionicons name="add" size={32} color={theme.accentText} />
+        </Pressable>
       )}
 
       {/* multi-select action bar */}
@@ -880,7 +957,7 @@ function RenameModal({ item, onCancel, onSave }: { item: VaultItem | null; onCan
 
 // Lazy thumbnail for a cached/local image: decrypt to a viewable URI on mount,
 // release it on unmount. Falls back to an icon while loading / on failure.
-function Thumb({ item, getBytes }: { item: VaultItem; getBytes: (i: VaultItem) => Promise<Uint8Array> }) {
+function Thumb({ item, getBytes, fill }: { item: VaultItem; getBytes: (i: VaultItem) => Promise<Uint8Array>; fill?: boolean }) {
   const [uri, setUri] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
@@ -906,14 +983,15 @@ function Thumb({ item, getBytes }: { item: VaultItem; getBytes: (i: VaultItem) =
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item.id]);
 
+  const box = fill ? { width: "100%" as const, height: "100%" as const } : { width: 46, height: 46, borderRadius: 12 };
   if (!uri) {
     return (
-      <View style={{ width: 46, height: 46, borderRadius: 12, backgroundColor: CATEGORY_COLOR.image + "22", alignItems: "center", justifyContent: "center" }}>
-        <Ionicons name="image" size={24} color={CATEGORY_COLOR.image} />
+      <View style={{ ...box, backgroundColor: CATEGORY_COLOR.image + "22", alignItems: "center", justifyContent: "center" }}>
+        <Ionicons name="image" size={fill ? 34 : 24} color={CATEGORY_COLOR.image} />
       </View>
     );
   }
-  return <Image source={{ uri }} style={{ width: 46, height: 46, borderRadius: 12 }} resizeMode="cover" />;
+  return <Image source={{ uri }} style={box} resizeMode="cover" />;
 }
 
 function BarBtn({ icon, label, onPress, danger }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; danger?: boolean }) {
