@@ -23,6 +23,7 @@ import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import { useVault } from "../../src/state/VaultContext";
 import { Button, Field, Muted, Screen, Title } from "../../src/ui/components";
+import { Markdown } from "../../src/ui/Markdown";
 import { theme } from "../../src/ui/theme";
 import { makeViewableUri, releaseViewableUri, saveBytes } from "../../src/platform/io";
 import { compressImage, readFileBytes, deleteFromGallery } from "../../src/platform/media";
@@ -68,6 +69,9 @@ export default function Library() {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [textView, setTextView] = useState<TextView | null>(null);
   const [noteEdit, setNoteEdit] = useState<NoteEdit | null>(null);
+  const [noteBodies, setNoteBodies] = useState<Record<string, string>>({}); // id -> lowercased body, for content search
+  const [notePreview, setNotePreview] = useState(false);
+  const noteSel = useRef({ start: 0, end: 0 }); // caret position for toolbar inserts
   const [details, setDetails] = useState<VaultItem | null>(null);
   const [albumTarget, setAlbumTarget] = useState<AlbumTarget | null>(null);
   const [currentAlbum, setCurrentAlbum] = useState<string | null>(null); // open folder
@@ -91,16 +95,43 @@ export default function Library() {
     let list = items.filter((i) => {
       if (currentAlbum !== null && (i.album ?? "") !== currentAlbum) return false;
       if (filter !== "all" && categorize(i) !== filter) return false;
-      if (q && !i.name.toLowerCase().includes(q)) return false;
+      if (q) {
+        const inName = i.name.toLowerCase().includes(q);
+        const inBody = i.type === "note" && (noteBodies[i.id] ?? "").includes(q);
+        if (!inName && !inBody) return false;
+      }
       return true;
     });
     list = [...list].sort((a, b) => {
+      if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1; // pinned first
       if (sort === "name") return a.name.localeCompare(b.name);
       if (sort === "size") return b.size - a.size;
       return b.createdAt - a.createdAt;
     });
     return list;
-  }, [items, query, filter, sort, currentAlbum]);
+  }, [items, query, filter, sort, currentAlbum, noteBodies]);
+
+  // Cache decrypted note bodies (lowercased) so search can match note contents.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const missing = items.filter((i) => i.type === "note" && vault.isCached(i.id) && !(i.id in noteBodies));
+      if (!missing.length) return;
+      const next: Record<string, string> = {};
+      for (const n of missing) {
+        try {
+          next[n.id] = bytesToUtf8(await vault.readItem(n.id)).toLowerCase();
+        } catch {
+          /* skip unreadable */
+        }
+      }
+      if (!cancelled && Object.keys(next).length) setNoteBodies((prev) => ({ ...prev, ...next }));
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items]);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: items.length };
@@ -141,6 +172,12 @@ export default function Library() {
     await vault.updateItemMeta(item.id, { name: n });
     if (item.remote && cloud) await vault.pushItemMeta(cloud.store, item.id).catch(() => {});
     setRenaming(null);
+    setDetails(null);
+    refresh();
+  }
+
+  async function togglePin(item: VaultItem) {
+    await vault.updateItemMeta(item.id, { pinned: !item.pinned });
     setDetails(null);
     refresh();
   }
@@ -273,6 +310,7 @@ export default function Library() {
 
   function newNote() {
     setImportMenu(false);
+    setNotePreview(false); // new notes open in edit mode
     setNoteEdit({ name: "", body: "", json: false });
   }
 
@@ -297,6 +335,7 @@ export default function Library() {
     try {
       if (needsFetch) setBusy("Fetching from cloud…");
       if (item.type === "note") {
+        setNotePreview(true); // existing notes open rendered; tap Edit to change
         setNoteEdit({ item, name: item.name, body: bytesToUtf8(await readBytes(item)), json: !!item.isJson });
         return;
       }
@@ -407,10 +446,36 @@ export default function Library() {
       }
     }
     if (item) await vault.deleteItem(item.id); // simplest update: replace
-    await vault.addItem("note", name || "Untitled", utf8ToBytes(body), { isJson: json });
-    setNoteEdit(null);
+    const created = await vault.addItem("note", name || "Untitled", utf8ToBytes(body), { isJson: json });
+    if (item?.pinned) await vault.updateItemMeta(created.id, { pinned: true });
+    closeNote();
     refresh();
     void runSync(true);
+  }
+
+  function closeNote() {
+    setNoteEdit(null);
+    setNotePreview(false);
+  }
+
+  // Insert a markdown snippet at the caret (or on a fresh line for block syntax).
+  function insertMd(snippet: string, blockLevel = false) {
+    if (!noteEdit) return;
+    const { start, end } = noteSel.current;
+    const body = noteEdit.body;
+    let s = snippet;
+    if (blockLevel && start > 0 && body[start - 1] !== "\n") s = "\n" + s;
+    setNoteEdit({ ...noteEdit, body: body.slice(0, start) + s + body.slice(end) });
+  }
+
+  // Flip a task checkbox from the rendered preview, by source line index.
+  function toggleNoteCheckbox(lineIndex: number) {
+    if (!noteEdit) return;
+    const lines = noteEdit.body.split("\n");
+    const m = /^(\s*-\s\[)([ xX])(\]\s+.*)$/.exec(lines[lineIndex] ?? "");
+    if (!m) return;
+    lines[lineIndex] = m[1] + (m[2].toLowerCase() === "x" ? " " : "x") + m[3];
+    setNoteEdit({ ...noteEdit, body: lines.join("\n") });
   }
 
   // ---- selection ----
@@ -698,6 +763,7 @@ export default function Library() {
                     {item.album ? ` · ${item.album}` : ""}
                   </Text>
                 </View>
+                {item.pinned && <Ionicons name="star" size={14} color={theme.accent} />}
                 {item.remote && (
                   <Ionicons
                     name={item.cached === false ? "cloud-outline" : "cloud-done-outline"}
@@ -848,17 +914,17 @@ export default function Library() {
         </Screen>
       </Modal>
 
-      {/* note editor */}
-      <Modal visible={!!noteEdit} onRequestClose={() => setNoteEdit(null)} animationType="slide">
+      {/* note editor — markdown with live preview + checklists */}
+      <Modal visible={!!noteEdit} onRequestClose={closeNote} animationType="slide">
         {noteEdit && (
           <Screen>
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-              <Pressable onPress={() => setNoteEdit(null)} hitSlop={8}>
+              <Pressable onPress={closeNote} hitSlop={8}>
                 <Text style={{ color: theme.muted, fontSize: 16 }}>Cancel</Text>
               </Pressable>
-              <Pressable onPress={() => setNoteEdit({ ...noteEdit, json: !noteEdit.json })} hitSlop={8} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <Ionicons name={noteEdit.json ? "code-slash" : "code-slash-outline"} size={18} color={noteEdit.json ? theme.accent : theme.muted} />
-                <Text style={{ color: noteEdit.json ? theme.accent : theme.muted, fontSize: 13 }}>JSON</Text>
+              <Pressable onPress={() => setNotePreview((p) => !p)} hitSlop={8} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Ionicons name={notePreview ? "create-outline" : "eye-outline"} size={18} color={theme.accent} />
+                <Text style={{ color: theme.accent, fontSize: 14 }}>{notePreview ? "Edit" : "Preview"}</Text>
               </Pressable>
               <Pressable onPress={saveNote} hitSlop={8}>
                 <Text style={{ color: theme.accent, fontSize: 16, fontWeight: "700" }}>Save</Text>
@@ -871,22 +937,40 @@ export default function Library() {
               placeholderTextColor={theme.muted}
               style={{ color: theme.text, fontSize: 22, fontWeight: "700", paddingVertical: 6 }}
             />
-            <TextInput
-              value={noteEdit.body}
-              onChangeText={(t) => setNoteEdit({ ...noteEdit, body: t })}
-              placeholder={noteEdit.json ? '{\n  "key": "value"\n}' : "Start typing…"}
-              placeholderTextColor={theme.muted}
-              multiline
-              autoFocus={!noteEdit.item}
-              textAlignVertical="top"
-              style={{
-                flex: 1,
-                color: theme.text,
-                fontSize: 17,
-                lineHeight: 25,
-                fontFamily: noteEdit.json ? "monospace" : undefined,
-              }}
-            />
+
+            {notePreview ? (
+              <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 30 }}>
+                {noteEdit.body.trim() ? (
+                  <Markdown source={noteEdit.body} onToggleCheckbox={toggleNoteCheckbox} />
+                ) : (
+                  <Muted>Nothing to preview yet — tap Edit and start writing.</Muted>
+                )}
+              </ScrollView>
+            ) : (
+              <>
+                <TextInput
+                  value={noteEdit.body}
+                  onChangeText={(t) => setNoteEdit({ ...noteEdit, body: t })}
+                  onSelectionChange={(e) => (noteSel.current = e.nativeEvent.selection)}
+                  placeholder="Start writing… use the bar below for headings, lists and checkboxes."
+                  placeholderTextColor={theme.muted}
+                  multiline
+                  autoFocus={!noteEdit.item}
+                  textAlignVertical="top"
+                  style={{ flex: 1, color: theme.text, fontSize: 17, lineHeight: 25 }}
+                />
+                {/* formatting toolbar */}
+                <View style={{ flexDirection: "row", gap: 6, paddingTop: 8, borderTopWidth: 1, borderTopColor: theme.border }}>
+                  <MdBtn label="H1" onPress={() => insertMd("# ", true)} />
+                  <MdBtn label="H2" onPress={() => insertMd("## ", true)} />
+                  <MdBtn icon="text" onPress={() => insertMd("**bold**")} />
+                  <MdBtn icon="list" onPress={() => insertMd("- ", true)} />
+                  <MdBtn icon="checkbox-outline" onPress={() => insertMd("- [ ] ", true)} />
+                  <MdBtn icon="code-slash" onPress={() => insertMd("`code`")} />
+                  <MdBtn icon="remove" onPress={() => insertMd("\n---\n")} />
+                </View>
+              </>
+            )}
           </Screen>
         )}
       </Modal>
@@ -902,6 +986,7 @@ export default function Library() {
             <SheetRow icon="open-outline" label="Open" onPress={() => { const d = details; setDetails(null); d && open(d); }} />
             <SheetRow icon="share-outline" label="Export" onPress={() => { const d = details; setDetails(null); d && exportItem(d); }} />
             <SheetRow icon="create-outline" label="Rename" onPress={() => setRenaming(details)} />
+            <SheetRow icon={details.pinned ? "star" : "star-outline"} label={details.pinned ? "Unpin" : "Pin to top"} onPress={() => togglePin(details)} />
             {details.remote && details.cached === false && (
               <SheetRow icon="cloud-download-outline" label="Download (cache offline)" sub="Keep a copy on this device" onPress={() => cacheItem(details)} />
             )}
@@ -992,6 +1077,17 @@ function Thumb({ item, getBytes, fill }: { item: VaultItem; getBytes: (i: VaultI
     );
   }
   return <Image source={{ uri }} style={box} resizeMode="cover" />;
+}
+
+function MdBtn({ label, icon, onPress }: { label?: string; icon?: keyof typeof Ionicons.glyphMap; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={{ flex: 1, height: 40, borderRadius: theme.radiusSm, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, alignItems: "center", justifyContent: "center" }}
+    >
+      {icon ? <Ionicons name={icon} size={18} color={theme.text} /> : <Text style={{ color: theme.text, fontWeight: "700", fontSize: 13 }}>{label}</Text>}
+    </Pressable>
+  );
 }
 
 function BarBtn({ icon, label, onPress, danger }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; danger?: boolean }) {

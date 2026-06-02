@@ -333,16 +333,17 @@ export class VaultService {
     await this.persistIndex();
   }
 
-  /** Rename an item and/or move it to an album (pass album: "" to clear). */
+  /** Rename, move to an album (album: "" clears), and/or pin an item. */
   async updateItemMeta(
     id: string,
-    changes: { name?: string; album?: string }
+    changes: { name?: string; album?: string; pinned?: boolean }
   ): Promise<void> {
     this.requireUnlocked();
     const item = this.index!.items.find((i) => i.id === id);
     if (!item) throw new Error("Item not found");
     if (changes.name !== undefined) item.name = changes.name;
     if (changes.album !== undefined) item.album = changes.album || undefined;
+    if (changes.pinned !== undefined) item.pinned = changes.pinned || undefined;
     await this.persistIndex();
   }
 

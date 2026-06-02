@@ -33,6 +33,8 @@ export interface VaultItem {
   sourceUrl?: string;
   // Optional album/folder for organization.
   album?: string;
+  // Pinned items sort to the top.
+  pinned?: boolean;
   // ---- cloud sync (optional; absent on a purely-local item) ----
   remote?: RemoteRef; // set when a cloud copy exists
   cached?: boolean; // false = pulled-but-not-downloaded; undefined/true = blob is on-device
