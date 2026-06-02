@@ -8,15 +8,15 @@ export const theme = {
   border: "#332a22", // hairline separators
   text: "#f6f1ea",
   muted: "#a9a092",
-  accent: "#c79a6b", // primary — caramel brown
-  accent2: "#9c6b43", // gradient end / secondary — deeper brown
-  accentText: "#1a120b", // text on the accent gradient
-  danger: "#e07a6b",
-  good: "#7bbf8a",
-  warn: "#e0b066",
+  accent: "#e8cda3", // primary — light wheat/tan
+  accent2: "#d4b488", // gradient end / secondary — soft sand
+  accentText: "#241a0f", // dark text on the light accent
+  danger: "#e58a7c",
+  good: "#8fcf9b",
+  warn: "#e8c27e",
   radiusSm: 12,
   radius: 16,
   radiusLg: 22,
   // accent gradient stops (used by Button + sidebar highlight)
-  gradient: ["#cda06f", "#9c6b43"] as [string, string],
+  gradient: ["#f0dcbd", "#d4b488"] as [string, string],
 };
