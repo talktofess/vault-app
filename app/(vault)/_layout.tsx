@@ -1,79 +1,87 @@
-import { Platform } from "react-native";
+import { Platform, Pressable, Text, View } from "react-native";
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { theme } from "../../src/ui/theme";
 
 const isWeb = Platform.OS === "web";
+const RAIL = 76; // width of the vertical tab rail
+
+// The visible destinations, in order, for the side rail. (Hidden routes like
+// media/notes/files/cloud aren't listed; camera/browser are native-only.)
+type Dest = { name: string; label: string; icon: keyof typeof Ionicons.glyphMap };
+const DESTS: Dest[] = [
+  { name: "library", label: "Vault", icon: "albums-outline" },
+  { name: "passwords", label: "Keys", icon: "key-outline" },
+  ...(!isWeb ? ([{ name: "camera", label: "Camera", icon: "camera-outline" }] as Dest[]) : []),
+  ...(!isWeb ? ([{ name: "browser", label: "Browse", icon: "globe-outline" }] as Dest[]) : []),
+  { name: "settings", label: "Settings", icon: "settings-outline" },
+];
+
+// Vertical tab rail on the left, replacing the default bottom bar.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function SideRail({ state, navigation }: any) {
+  const activeName: string | undefined = state.routes[state.index]?.name;
+  return (
+    <View
+      style={{
+        position: "absolute",
+        left: 0,
+        top: 0,
+        bottom: 0,
+        width: RAIL,
+        backgroundColor: theme.bgElevated,
+        borderRightWidth: 1,
+        borderRightColor: theme.border,
+        paddingTop: 54,
+        gap: 4,
+      }}
+    >
+      {DESTS.map((d) => {
+        const focused = activeName === d.name;
+        return (
+          <Pressable
+            key={d.name}
+            onPress={() => navigation.navigate(d.name)}
+            style={{
+              marginHorizontal: 8,
+              paddingVertical: 12,
+              borderRadius: theme.radiusSm,
+              alignItems: "center",
+              gap: 4,
+              backgroundColor: focused ? theme.surfaceAlt : "transparent",
+            }}
+          >
+            <Ionicons name={d.icon} size={22} color={focused ? theme.accent : theme.muted} />
+            <Text style={{ color: focused ? theme.accent : theme.muted, fontSize: 10, fontWeight: "600" }}>{d.label}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
 
 export default function VaultTabs() {
   return (
     <Tabs
+      tabBar={(props) => <SideRail {...props} />}
+      sceneContainerStyle={{ paddingLeft: RAIL, backgroundColor: theme.bg }}
       screenOptions={{
         headerStyle: { backgroundColor: theme.bg },
         headerTintColor: theme.text,
         headerTitleStyle: { fontWeight: "800", letterSpacing: -0.3 },
         headerShadowVisible: false,
-        tabBarStyle: {
-          backgroundColor: theme.bgElevated,
-          borderTopColor: theme.border,
-          height: 64,
-          paddingTop: 8,
-          paddingBottom: 10,
-        },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
-        tabBarActiveTintColor: theme.accent,
-        tabBarInactiveTintColor: theme.muted,
       }}
     >
-      <Tabs.Screen
-        name="library"
-        options={{
-          title: "Vault",
-          tabBarIcon: ({ color, size }) => <Ionicons name="albums-outline" size={size} color={color} />,
-        }}
-      />
-      {/* media / notes / files are now unified into the Library ("Vault") tab.
-          The routes stay registered (deep links / in-app navigation still work)
-          but are hidden from the tab bar to keep one place for everything. */}
+      <Tabs.Screen name="library" options={{ title: "Vault" }} />
+      {/* media / notes / files unified into Library; routes stay registered but hidden */}
       <Tabs.Screen name="media" options={{ href: null, title: "Media" }} />
       <Tabs.Screen name="notes" options={{ href: null, title: "Notes" }} />
       <Tabs.Screen name="files" options={{ href: null, title: "Files" }} />
-      {/* reachable from Settings via router.push, not a tab */}
       <Tabs.Screen name="cloud" options={{ href: null, title: "Cloud sync" }} />
-      <Tabs.Screen
-        name="passwords"
-        options={{
-          title: "Keys",
-          tabBarIcon: ({ color, size }) => <Ionicons name="key-outline" size={size} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="camera"
-        options={{
-          title: "Camera",
-          // The in-app camera is native-only; hide its tab on web (the route
-          // still exists as a placeholder).
-          href: isWeb ? null : undefined,
-          tabBarIcon: ({ color, size }) => <Ionicons name="camera-outline" size={size} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="browser"
-        options={{
-          title: "Browse",
-          // Downloading is phone-only; hide this tab on web (route still resolves
-          // to the web stub so the native WebView screen isn't bundled there).
-          href: isWeb ? null : undefined,
-          tabBarIcon: ({ color, size }) => <Ionicons name="globe-outline" size={size} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="settings"
-        options={{
-          title: "Settings",
-          tabBarIcon: ({ color, size }) => <Ionicons name="settings-outline" size={size} color={color} />,
-        }}
-      />
+      <Tabs.Screen name="passwords" options={{ title: "Keys" }} />
+      <Tabs.Screen name="camera" options={{ title: "Camera", href: isWeb ? null : undefined }} />
+      <Tabs.Screen name="browser" options={{ title: "Browse", href: isWeb ? null : undefined }} />
+      <Tabs.Screen name="settings" options={{ title: "Settings" }} />
     </Tabs>
   );
 }

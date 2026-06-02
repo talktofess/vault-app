@@ -27,7 +27,8 @@ import type { CloudStore } from "../cloud/ports";
 import { buildVaultKeys, recoverDek } from "../cloud/keyflows";
 import { decodeFk, decodeMeta, decodeObject, encodeItem } from "../cloud/codec";
 import { StreamReader, type RemoteStream } from "../cloud/stream";
-import { CHUNK } from "../crypto/chunkCipher";
+import { CHUNK, chunkCount } from "../crypto/chunkCipher";
+import { packSealed } from "../crypto/keys";
 
 const BIO_KEY = "vault.dek"; // keychain entry holding the DEK for biometric unlock
 
@@ -557,6 +558,37 @@ export class VaultService {
     item.remote = { path: row.storagePath, updatedAt, wrappedFk: row.wrappedFk, byteSize: row.byteSize };
     item.cached = true;
     await this.persistIndex();
+  }
+
+  /**
+   * Re-sync just an item's metadata (name/album) to the cloud — re-seals
+   * enc_meta and updates the row, WITHOUT re-uploading the blob. No-op if the
+   * item has no cloud copy yet.
+   */
+  async pushItemMeta(cloud: CloudStore, id: string): Promise<void> {
+    this.requireUnlocked();
+    const item = this.index!.items.find((i) => i.id === id);
+    if (!item?.remote) return;
+    const meta = {
+      name: item.name,
+      mime: item.mime,
+      album: item.album,
+      kind: item.type,
+      plainSize: item.size,
+      chunkSize: CHUNK,
+      chunkCount: chunkCount(item.size),
+    };
+    await cloud.upsertItem({
+      id,
+      encMeta: packSealed(seal(this.dek!, utf8ToBytes(JSON.stringify(meta)))),
+      wrappedFk: item.remote.wrappedFk,
+      byteSize: item.remote.byteSize,
+      storagePath: item.remote.path,
+      contentHash: null,
+      createdAt: new Date(item.createdAt).toISOString(),
+      updatedAt: this.nowIso(),
+      deletedAt: null,
+    });
   }
 
   /** Push every local item that isn't on the cloud yet. Returns the count pushed. */

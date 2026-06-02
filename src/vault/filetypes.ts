@@ -89,14 +89,14 @@ export const CATEGORY_ICON: Record<FileCategory, IoniconName> = {
 };
 
 export const CATEGORY_COLOR: Record<FileCategory, string> = {
-  image: "#6ea8fe",
-  video: "#c792ea",
-  audio: "#4cd47a",
-  document: "#ffcb6b",
-  apk: "#a8d24c",
-  archive: "#ff9d6b",
-  note: "#82d4ff",
-  other: "#8b90a0",
+  image: "#d9a86b", // tan
+  video: "#c792ea", // violet
+  audio: "#7bbf8a", // sage
+  document: "#e0b066", // amber
+  apk: "#a8c45c", // olive
+  archive: "#e09b6b", // clay
+  note: "#cdb38a", // sand
+  other: "#a9a092", // stone
 };
 
 // Filter chips shown across the top of the Library, in display order.

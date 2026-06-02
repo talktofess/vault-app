@@ -2,7 +2,7 @@
 // audio, documents, APKs, archives, notes, anything. Browse with search +
 // type filters + sort, import from anywhere, open type-aware previews, and
 // manage in bulk (multi-select delete / export / move-to-album).
-import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -68,6 +68,8 @@ export default function Library() {
   const [noteEdit, setNoteEdit] = useState<NoteEdit | null>(null);
   const [details, setDetails] = useState<VaultItem | null>(null);
   const [albumTarget, setAlbumTarget] = useState<AlbumTarget | null>(null);
+  const [currentAlbum, setCurrentAlbum] = useState<string | null>(null); // open folder
+  const [renaming, setRenaming] = useState<VaultItem | null>(null);
 
   const refresh = useCallback(() => {
     if (unlocked) setItems(vault.listItems().filter((i) => i.type !== "credential"));
@@ -81,10 +83,11 @@ export default function Library() {
     }, [refresh])
   );
 
-  // ---- derived list: filter + search + sort ----
+  // ---- derived list: folder + filter + search + sort ----
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     let list = items.filter((i) => {
+      if (currentAlbum !== null && (i.album ?? "") !== currentAlbum) return false;
       if (filter !== "all" && categorize(i) !== filter) return false;
       if (q && !i.name.toLowerCase().includes(q)) return false;
       return true;
@@ -95,7 +98,7 @@ export default function Library() {
       return b.createdAt - a.createdAt;
     });
     return list;
-  }, [items, query, filter, sort]);
+  }, [items, query, filter, sort, currentAlbum]);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: items.length };
@@ -105,6 +108,40 @@ export default function Library() {
     }
     return c;
   }, [items]);
+
+  // Folders (albums) with their item counts, for the folder cards.
+  const albums = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const i of items) if (i.album) m.set(i.album, (m.get(i.album) ?? 0) + 1);
+    return [...m.entries()].map(([name, n]) => ({ name, n })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [items]);
+
+  // ---- gallery review: step through previewable media in the current view ----
+  const isPreviewable = (it: VaultItem) => {
+    const c = categorize(it);
+    return c === "image" || c === "video" || c === "audio";
+  };
+  async function gotoAdjacent(delta: number) {
+    if (!preview) return;
+    const media = visible.filter(isPreviewable);
+    const idx = media.findIndex((i) => i.id === preview.item.id);
+    const next = media[idx + delta];
+    if (!next) return;
+    await preview.release();
+    setPreview(null);
+    await open(next);
+  }
+
+  // ---- rename (edit) ----
+  async function doRename(item: VaultItem, name: string) {
+    const n = name.trim();
+    if (!n) return;
+    await vault.updateItemMeta(item.id, { name: n });
+    if (item.remote && cloud) await vault.pushItemMeta(cloud.store, item.id).catch(() => {});
+    setRenaming(null);
+    setDetails(null);
+    refresh();
+  }
 
   // ---- import ----
   async function importPhotos() {
@@ -387,7 +424,11 @@ export default function Library() {
   }
 
   async function applyAlbum(ids: string[], album: string) {
-    for (const id of ids) await vault.updateItemMeta(id, { album });
+    for (const id of ids) {
+      await vault.updateItemMeta(id, { album });
+      const it = items.find((i) => i.id === id);
+      if (it?.remote && cloud) await vault.pushItemMeta(cloud.store, id).catch(() => {});
+    }
     setAlbumTarget(null);
     clearSelect();
     setDetails(null);
@@ -445,7 +486,7 @@ export default function Library() {
                   borderColor: active ? theme.accent : theme.border,
                 }}
               >
-                <Text style={{ color: active ? "#0e0f13" : theme.text, fontWeight: "600", fontSize: 13 }}>
+                <Text style={{ color: active ? theme.accentText : theme.text, fontWeight: "600", fontSize: 13 }}>
                   {f.label} {n > 0 ? n : ""}
                 </Text>
               </Pressable>
@@ -453,6 +494,42 @@ export default function Library() {
           })}
         </ScrollView>
       </View>
+
+      {/* folders (albums): cards to open, or a breadcrumb when inside one */}
+      {currentAlbum !== null ? (
+        <Pressable onPress={() => setCurrentAlbum(null)} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Ionicons name="chevron-back" size={18} color={theme.accent} />
+          <Ionicons name="folder-open" size={16} color={theme.accent} />
+          <Text style={{ color: theme.text, fontWeight: "700" }} numberOfLines={1}>{currentAlbum}</Text>
+          <Text style={{ color: theme.muted }}>· back to all</Text>
+        </Pressable>
+      ) : albums.length > 0 && filter === "all" && !query.trim() ? (
+        <View style={{ height: 88 }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
+            {albums.map((a) => (
+              <Pressable
+                key={a.name}
+                onPress={() => setCurrentAlbum(a.name)}
+                style={{
+                  width: 124,
+                  borderRadius: theme.radius,
+                  padding: 12,
+                  backgroundColor: theme.surface,
+                  borderWidth: 1,
+                  borderColor: theme.border,
+                  justifyContent: "space-between",
+                }}
+              >
+                <Ionicons name="folder" size={26} color={theme.accent} />
+                <View style={{ marginTop: 10 }}>
+                  <Text numberOfLines={1} style={{ color: theme.text, fontWeight: "600", fontSize: 13 }}>{a.name}</Text>
+                  <Text style={{ color: theme.muted, fontSize: 11 }}>{a.n} item{a.n === 1 ? "" : "s"}</Text>
+                </View>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      ) : null}
 
       {visible.length === 0 ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 14, paddingBottom: 60 }}>
@@ -593,13 +670,36 @@ export default function Library() {
         <SheetRow icon="create-outline" label="New note" sub="Encrypted text or JSON" onPress={newNote} />
       </Sheet>
 
-      {/* image / video / audio preview */}
+      {/* image / video / audio preview — swipe through the current view */}
       <Modal visible={!!preview} onRequestClose={closePreview} animationType="fade">
         <View style={{ flex: 1, backgroundColor: "#000", justifyContent: "center" }}>
           {preview && !preview.av && <Image source={{ uri: preview.uri }} style={{ flex: 1 }} resizeMode="contain" />}
           {preview && preview.av && (
             <Video source={{ uri: preview.uri }} style={{ flex: 1 }} useNativeControls resizeMode={ResizeMode.CONTAIN} shouldPlay />
           )}
+
+          {/* title + position */}
+          {preview && (
+            <View style={{ position: "absolute", top: 44, left: 16, right: 16, alignItems: "center" }}>
+              <Text numberOfLines={1} style={{ color: "#fff", fontWeight: "700" }}>{preview.item.name}</Text>
+              {(() => {
+                const media = visible.filter(isPreviewable);
+                const i = media.findIndex((m) => m.id === preview.item.id);
+                return media.length > 1 ? (
+                  <Text style={{ color: "rgba(255,255,255,0.6)", fontSize: 12 }}>{i + 1} / {media.length}</Text>
+                ) : null;
+              })()}
+            </View>
+          )}
+
+          {/* prev / next */}
+          <Pressable onPress={() => gotoAdjacent(-1)} hitSlop={6} style={{ position: "absolute", left: 0, top: 70, bottom: 90, width: 64, alignItems: "center", justifyContent: "center" }}>
+            <Ionicons name="chevron-back" size={36} color="rgba(255,255,255,0.6)" />
+          </Pressable>
+          <Pressable onPress={() => gotoAdjacent(1)} hitSlop={6} style={{ position: "absolute", right: 0, top: 70, bottom: 90, width: 64, alignItems: "center", justifyContent: "center" }}>
+            <Ionicons name="chevron-forward" size={36} color="rgba(255,255,255,0.6)" />
+          </Pressable>
+
           <View style={{ padding: 20, flexDirection: "row", gap: 10 }}>
             <View style={{ flex: 1 }}>
               <Button label="Export" variant="outline" onPress={() => preview && exportItem(preview.item)} />
@@ -667,6 +767,7 @@ export default function Library() {
             </Text>
             <SheetRow icon="open-outline" label="Open" onPress={() => { const d = details; setDetails(null); d && open(d); }} />
             <SheetRow icon="share-outline" label="Export" onPress={() => { const d = details; setDetails(null); d && exportItem(d); }} />
+            <SheetRow icon="create-outline" label="Rename" onPress={() => setRenaming(details)} />
             {details.remote && details.cached === false && (
               <SheetRow icon="cloud-download-outline" label="Download (cache offline)" sub="Keep a copy on this device" onPress={() => cacheItem(details)} />
             )}
@@ -686,7 +787,35 @@ export default function Library() {
         onCancel={() => setAlbumTarget(null)}
         onPick={(name) => albumTarget && applyAlbum(albumTarget.ids, name)}
       />
+
+      {/* rename */}
+      <RenameModal item={renaming} onCancel={() => setRenaming(null)} onSave={(name) => renaming && doRename(renaming, name)} />
     </Screen>
+  );
+}
+
+function RenameModal({ item, onCancel, onSave }: { item: VaultItem | null; onCancel: () => void; onSave: (name: string) => void }) {
+  const [name, setName] = useState("");
+  useEffect(() => {
+    if (item) setName(item.name);
+  }, [item]);
+  return (
+    <Modal visible={!!item} transparent animationType="fade" onRequestClose={onCancel}>
+      <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", padding: 20 }}>
+        <View style={{ backgroundColor: theme.bg, borderRadius: theme.radius, borderWidth: 1, borderColor: theme.border, padding: 20, gap: 12 }}>
+          <Text style={{ color: theme.text, fontSize: 18, fontWeight: "700" }}>Rename</Text>
+          <Field value={name} onChangeText={setName} placeholder="Name" autoFocus />
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <View style={{ flex: 1 }}>
+              <Button label="Save" onPress={() => onSave(name)} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Button label="Cancel" variant="outline" onPress={onCancel} />
+            </View>
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
