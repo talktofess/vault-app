@@ -7,7 +7,6 @@ import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useVault } from "../../src/state/VaultContext";
 import { Button, Field, Muted, Title } from "../../src/ui/components";
-import { PinModal } from "../../src/ui/PinPad";
 import { theme } from "../../src/ui/theme";
 import { ensureSignedIn } from "../../src/cloud/account";
 
@@ -18,7 +17,6 @@ export default function Cloud() {
   const [linked, setLinked] = useState(false);
   const [safeWords, setSafeWords] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
-  const [adoptPin, setAdoptPin] = useState(false); // PIN prompt for merging into an existing cloud vault
 
   const refresh = useCallback(async () => {
     if (!cloud) return;
@@ -60,11 +58,10 @@ export default function Cloud() {
       if (!(await vault.cloudEnabled(cloud!.store))) {
         await vault.enableCloud(cloud!.store, safeWords.trim()); // first device for these safe words
       } else if (!(await vault.cloudKeyMatchesLocal(cloud!.store, safeWords.trim()))) {
-        // A shared cloud vault already exists under a different local key — merge
-        // this device in. Confirm with the PIN (needed to re-key the vault).
-        setBusy(null);
-        setAdoptPin(true);
-        return;
+        // A shared vault already exists — merge this device in. The shared PIN
+        // comes from the account, so no extra prompt is needed.
+        setBusy("Merging this device…");
+        await vault.adoptCloudVault(cloud!.store, safeWords.trim());
       }
       await finishSync(uid);
     } catch (e) {
@@ -79,21 +76,7 @@ export default function Cloud() {
     const { added } = await vault.pull(cloud!.store);
     setSafeWords("");
     setLinked(true);
-    Alert.alert("Cloud connected", `This device is now part of your vault — uploaded ${pushed}, pulled ${added} new.`);
-  }
-
-  async function onAdoptPin(pin: string) {
-    setAdoptPin(false);
-    setBusy("Merging this device…");
-    try {
-      await vault.adoptCloudVault(cloud!.store, safeWords.trim(), pin);
-      const uid = await cloud!.auth.currentUserId();
-      if (uid) await finishSync(uid);
-    } catch (e) {
-      handleConnectError(e);
-    } finally {
-      setBusy(null);
-    }
+    Alert.alert("Cloud connected", `This device is now part of your vault — uploaded ${pushed}, pulled ${added} new. It unlocks with your account PIN.`);
   }
 
   function handleConnectError(e: unknown) {
@@ -158,15 +141,6 @@ export default function Cloud() {
         opt-in per item; offline you can open only cached items. Keep your safe words safe — losing
         them means losing cloud access.
       </Muted>
-
-      <PinModal
-        visible={adoptPin}
-        title="Enter your PIN to merge"
-        subtitle="This account already has a vault. Confirm your device PIN to merge this device's items into it."
-        step="adopt"
-        onSubmit={onAdoptPin}
-        onCancel={() => setAdoptPin(false)}
-      />
     </Panel>
   );
 }

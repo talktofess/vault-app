@@ -86,11 +86,11 @@ function makeStore(c: SupabaseClient): CloudStore {
     async getVaultKeys() {
       const { data, error } = await c
         .from("vault_keys")
-        .select("kdf, wrapped_dek, dek_version")
+        .select("kdf, wrapped_dek, dek_version, wrapped_pin")
         .maybeSingle();
       if (error) throw error;
       if (!data) return null;
-      return { kdf: data.kdf, wrappedDek: data.wrapped_dek, dekVersion: data.dek_version };
+      return { kdf: data.kdf, wrappedDek: data.wrapped_dek, dekVersion: data.dek_version, wrappedPin: data.wrapped_pin };
     },
     async putVaultKeys(keys: VaultKeysRow) {
       const user_id = await requireUserId(c);
@@ -99,6 +99,7 @@ function makeStore(c: SupabaseClient): CloudStore {
         kdf: keys.kdf,
         wrapped_dek: keys.wrappedDek,
         dek_version: keys.dekVersion,
+        wrapped_pin: keys.wrappedPin ?? null,
       });
       if (error) throw error;
     },

@@ -150,10 +150,13 @@ describe("cloud sync across two devices", () => {
     expect(await b.checkCloudPassphrase(store, "nope")).toBe(false);
     expect(await b.checkCloudPassphrase(store, "the-passphrase")).toBe(true);
 
-    const { pulled } = await b.restoreFromCloud(store, "the-passphrase", "5678");
+    const { pulled } = await b.restoreFromCloud(store, "the-passphrase"); // shared PIN comes from the account
     expect(pulled).toBe(2);
     expect(b.isUnlocked()).toBe(true);
     expect(b.listItems().map((i) => i.name).sort()).toEqual(["a.jpg", "b.bin"]);
+    // B uses A's PIN (the shared account PIN), not a new one.
+    b.lock();
+    expect(await b.unlock("1234")).toBe(true);
     expect(bytesToUtf8(await b.fetchRemoteBytes(store, b.listItems()[0].id)).length).toBeGreaterThan(0);
 
     // Refuses to clobber an existing local vault.
@@ -188,7 +191,7 @@ describe("cloud sync across two devices", () => {
     expect(await b.cloudKeyMatchesLocal(store, "shared safe words")).toBe(false);
 
     // Adopt + merge: re-key B's items to the cloud key, push them, pull A's.
-    await b.adoptCloudVault(store, "shared safe words", "2222");
+    await b.adoptCloudVault(store, "shared safe words");
     await b.pushAll(store, USER);
     await b.pull(store);
 
@@ -200,9 +203,10 @@ describe("cloud sync across two devices", () => {
     const aItem = b.listItems().find((i) => i.name === "from-A")!;
     expect(bytesToUtf8(await b.fetchRemoteBytes(store, aItem.id))).toBe("alpha");
 
-    // B still unlocks with its own PIN; the key is now the shared cloud key.
+    // B now unlocks with the SHARED account PIN (A's "1111"), not its old "2222".
     b.lock();
-    expect(await b.unlock("2222")).toBe(true);
+    expect(await b.unlock("2222")).toBe(false);
+    expect(await b.unlock("1111")).toBe(true);
 
     // A pulls and gets B's item too — one vault.
     const { added } = await a.pull(store);

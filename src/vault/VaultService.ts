@@ -24,7 +24,7 @@ import {
   type VaultManifest,
 } from "./types";
 import type { CloudStore } from "../cloud/ports";
-import { buildVaultKeys, recoverDek } from "../cloud/keyflows";
+import { buildVaultKeys, recoverDek, recoverPin } from "../cloud/keyflows";
 import { decodeFk, decodeMeta, decodeObject, encodeItem } from "../cloud/codec";
 import { StreamReader, type RemoteStream } from "../cloud/stream";
 import { CHUNK, chunkCount } from "../crypto/chunkCipher";
@@ -42,6 +42,7 @@ export class VaultService {
   private indexId: string = INDEX_ID; // switches to the decoy index under duress
   private decoy = false; // true when unlocked via the duress password
   private lastIntrusions: number[] = []; // failed attempts seen at last unlock
+  private sessionPin: string | null = null; // the PIN used this session (to sync as the shared PIN)
 
   constructor(
     private storage: Storage,
@@ -61,6 +62,7 @@ export class VaultService {
   lock(): void {
     if (this.dek) this.dek.fill(0);
     this.dek = null;
+    this.sessionPin = null;
     this.index = null;
     this.indexId = INDEX_ID;
     this.decoy = false;
@@ -95,6 +97,7 @@ export class VaultService {
     };
     await this.storage.writeManifest(JSON.stringify(manifest));
     this.dek = dek;
+    this.sessionPin = password;
     this.index = { items: [] };
     await this.persistIndex();
   }
@@ -119,6 +122,7 @@ export class VaultService {
     try {
       if (bytesToUtf8(open(mk, m.verifier)) === VERIFIER_PLAINTEXT) {
         this.dek = open(mk, m.wrappedDek);
+        this.sessionPin = password;
         this.decoy = false;
         this.indexId = INDEX_ID;
         await this.loadIndex();
@@ -500,11 +504,17 @@ export class VaultService {
     return recoverDek(keys, passphrase);
   }
 
-  /** Publish this vault's DEK wrapped under the account passphrase (enable cloud). */
+  /** Publish this vault's DEK + shared PIN wrapped under the passphrase (enable cloud). */
   async enableCloud(cloud: CloudStore, passphrase: string): Promise<void> {
     this.requireUnlocked();
     if (this.decoy) throw new Error("Cannot enable cloud from the decoy vault");
-    await cloud.putVaultKeys(buildVaultKeys(this.dek!, passphrase));
+    await cloud.putVaultKeys(buildVaultKeys(this.dek!, passphrase, undefined, this.sessionPin));
+  }
+
+  /** Recover the account's shared PIN (set on the first device), or null. */
+  static async recoverPinFromCloud(cloud: CloudStore, passphrase: string): Promise<string | null> {
+    const keys = await cloud.getVaultKeys();
+    return keys ? recoverPin(keys, passphrase) : null;
   }
 
   async cloudEnabled(cloud: CloudStore): Promise<boolean> {
@@ -670,12 +680,17 @@ export class VaultService {
   async restoreFromCloud(
     cloud: CloudStore,
     passphrase: string,
-    pin: string
+    fallbackPin?: string
   ): Promise<{ pulled: number }> {
     if (await this.exists()) throw new Error("A vault already exists on this device");
     const keys = await cloud.getVaultKeys();
     if (!keys) throw new Error("No cloud vault found for this account");
     const dek = recoverDek(keys, passphrase); // throws on a wrong passphrase
+    const pin = recoverPin(keys, passphrase) ?? fallbackPin; // prefer the account's shared PIN
+    if (!pin) {
+      const err = new Error("NO_SHARED_PIN");
+      throw err; // caller should ask the user to set a PIN, then retry with it
+    }
     await this.createWithDek(pin, dek);
     const { added } = await this.pull(cloud);
     return { pulled: added };
@@ -689,52 +704,50 @@ export class VaultService {
    * and pulls the rest. Needed when a device was set up independently before
    * connecting — the "one vault across devices" path.
    */
-  async adoptCloudVault(
-    cloud: CloudStore,
-    passphrase: string,
-    pin: string
-  ): Promise<{ migrated: number }> {
+  async adoptCloudVault(cloud: CloudStore, passphrase: string): Promise<{ migrated: number }> {
     this.requireUnlocked();
     if (this.decoy) throw new Error("Cannot link cloud from the decoy vault");
     const keys = await cloud.getVaultKeys();
     if (!keys) throw new Error("No cloud vault found for these safe words");
     const cloudDek = recoverDek(keys, passphrase);
+    // The whole account shares one PIN. Prefer the stored one; if absent (vault
+    // predates the feature), seed it from this device's PIN and back it up.
+    const sharedPin = recoverPin(keys, passphrase) ?? this.sessionPin;
+    if (!sharedPin) throw new Error("Couldn't determine the shared PIN for this account.");
+    if (!keys.wrappedPin) await cloud.putVaultKeys(buildVaultKeys(cloudDek, passphrase, undefined, sharedPin));
 
-    // Verify the PIN so we can re-wrap the manifest's DEK under it.
-    const m = await this.loadManifest();
-    const mk = deriveKey(pin, fromB64(m.kdf.salt), m.kdf.iterations);
-    let pinOk = false;
-    try {
-      pinOk = bytesToUtf8(open(mk, m.verifier)) === VERIFIER_PLAINTEXT;
-    } catch {
-      pinOk = false;
-    }
-    if (!pinOk) throw new Error("Wrong PIN");
-
+    // Re-encrypt local items from this device's DEK to the shared cloud DEK.
     const same = cloudDek.length === this.dek!.length && cloudDek.every((b, i) => b === this.dek![i]);
     let migrated = 0;
     if (!same) {
       const oldDek = this.dek!;
-      // re-encrypt each local item blob old DEK -> cloud DEK
       for (const item of this.index!.items) {
         const blob = await this.storage.readBlob(item.id);
         if (!blob) continue;
         const sealed = JSON.parse(bytesToUtf8(blob)) as Sealed;
         await this.storage.writeBlob(item.id, utf8ToBytes(JSON.stringify(seal(cloudDek, open(oldDek, sealed)))));
-        item.remote = undefined; // force a re-push under the shared key
+        item.remote = undefined; // re-push under the shared key
         item.cached = true;
         migrated++;
       }
       this.dek = cloudDek;
-      const updated: VaultManifest = {
-        ...m,
-        wrappedDek: seal(mk, cloudDek),
-        verifier: seal(mk, utf8ToBytes(VERIFIER_PLAINTEXT)),
-      };
-      await this.storage.writeManifest(JSON.stringify(updated));
-      await this.persistIndex(); // re-encrypt the index under the cloud DEK
-      if (await this.keychain.getItem(BIO_KEY)) await this.keychain.setItem(BIO_KEY, toB64(cloudDek));
     }
+
+    // Re-wrap the manifest under the SHARED PIN (fresh salt) so this device
+    // unlocks with the account-wide PIN.
+    const m = await this.loadManifest();
+    const salt = randomBytes(SALT_LEN);
+    const mk = deriveKey(sharedPin, salt);
+    const updated: VaultManifest = {
+      ...m,
+      kdf: { salt: toB64(salt), iterations: KDF_ITERATIONS },
+      wrappedDek: seal(mk, this.dek!),
+      verifier: seal(mk, utf8ToBytes(VERIFIER_PLAINTEXT)),
+    };
+    await this.storage.writeManifest(JSON.stringify(updated));
+    await this.persistIndex();
+    if (await this.keychain.getItem(BIO_KEY)) await this.keychain.setItem(BIO_KEY, toB64(this.dek!));
+    this.sessionPin = sharedPin;
     return { migrated };
   }
 

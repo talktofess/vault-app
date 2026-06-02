@@ -15,6 +15,9 @@ export interface VaultKeysRow {
   kdf: KdfDescriptor;
   wrappedDek: string; // packed b64( nonce|ct|tag ) of GCM(KEK, DEK)
   dekVersion: number;
+  // The shared 4-digit PIN, encrypted under the KEK, so every device uses the
+  // same unlock PIN. Absent on vaults created before this feature.
+  wrappedPin?: string | null;
 }
 
 // public.items — one per stored item.

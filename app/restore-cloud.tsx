@@ -1,6 +1,7 @@
 // New-device bootstrap, "safe words only": enter your safe words -> the app
-// signs into the hidden derived account, recovers the encryption key, you pick a
-// new local PIN, and it pulls your vault. No email. Reached from onboarding.
+// signs into the hidden derived account, recovers the encryption key AND the
+// account's shared PIN, and pulls your vault. No email, and normally no PIN to
+// choose (it's the same PIN as your other devices). Reached from onboarding.
 import { useState } from "react";
 import { Alert, View } from "react-native";
 import { router } from "expo-router";
@@ -29,12 +30,28 @@ export default function RestoreCloud() {
     );
   }
 
+  function done(pulled: number) {
+    setUnlocked(true);
+    Alert.alert("Vault restored", `Pulled ${pulled} item${pulled === 1 ? "" : "s"} — unlocks with your account PIN. Tap an item to download it.`);
+    router.replace("/(vault)/library");
+  }
+
+  function handleError(e: unknown) {
+    const msg = e instanceof Error ? e.message : "Something went wrong.";
+    Alert.alert(
+      /confirm/i.test(msg) ? "Turn off email confirmation" : "Couldn't continue",
+      /confirm/i.test(msg)
+        ? "In Supabase: Authentication → Providers → Email → turn OFF “Confirm email”, then try again."
+        : msg
+    );
+  }
+
   async function continueFromWords() {
     if (safeWords.trim().length < 10) {
       Alert.alert("Safe words", "Enter the safe words you used when connecting cloud.");
       return;
     }
-    setBusy("Checking…");
+    setBusy("Restoring…");
     try {
       await ensureSignedIn(cloud!.auth, safeWords.trim());
       if (!(await vault.cloudEnabled(cloud!.store))) {
@@ -45,15 +62,18 @@ export default function RestoreCloud() {
         Alert.alert("Wrong safe words", "Those safe words don't open this vault.");
         return;
       }
-      setStage("setPin");
+      try {
+        const { pulled } = await vault.restoreFromCloud(cloud!.store, safeWords.trim());
+        done(pulled);
+      } catch (e) {
+        if (e instanceof Error && e.message === "NO_SHARED_PIN") {
+          setStage("setPin"); // account has no shared PIN yet — choose one here
+          return;
+        }
+        throw e;
+      }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Something went wrong.";
-      Alert.alert(
-        /confirm/i.test(msg) ? "Turn off email confirmation" : "Couldn't continue",
-        /confirm/i.test(msg)
-          ? "In Supabase: Authentication → Providers → Email → turn OFF “Confirm email”, then try again."
-          : msg
-      );
+      handleError(e);
     } finally {
       setBusy(null);
     }
@@ -82,9 +102,7 @@ export default function RestoreCloud() {
     setBusy("Restoring…");
     try {
       const { pulled } = await vault.restoreFromCloud(cloud!.store, safeWords.trim(), devicePin);
-      setUnlocked(true);
-      Alert.alert("Vault restored", `Pulled ${pulled} item${pulled === 1 ? "" : "s"}. Tap an item to download it.`);
-      router.replace("/(vault)/library");
+      done(pulled);
     } catch (e) {
       Alert.alert("Restore failed", e instanceof Error ? e.message : "Failed.");
       setStage("words");
@@ -101,16 +119,16 @@ export default function RestoreCloud() {
 
       {stage === "words" && (
         <>
-          <Muted>Enter your safe words — the single secret that unlocks your cloud vault. They derive your account and decrypt your files; Supabase never had them.</Muted>
+          <Muted>Enter your safe words — the single secret that unlocks your cloud vault. They derive your account, decrypt your files, and bring your shared PIN; Supabase never had them.</Muted>
           <Field value={safeWords} onChangeText={setSafeWords} placeholder="Your safe words" secureTextEntry />
-          <Button label={busy ?? "Continue"} onPress={continueFromWords} loading={!!busy} />
+          <Button label={busy ?? "Restore"} onPress={continueFromWords} loading={!!busy} />
           <Button label="Back" variant="outline" onPress={() => router.back()} />
         </>
       )}
 
       {(stage === "setPin" || stage === "confirmPin") && (
         <>
-          <Muted>{stage === "setPin" ? "Choose a 4-digit PIN for this device." : "Confirm the PIN."}</Muted>
+          <Muted>{stage === "setPin" ? "This account has no PIN yet — choose a 4-digit PIN. It becomes your PIN on every device." : "Confirm the PIN."}</Muted>
           <View style={{ flex: 1, justifyContent: "center" }}>
             <PinPad pin={pin} onChange={onPin} disabled={!!busy} />
           </View>
