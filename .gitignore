@@ -16,3 +16,6 @@ vault-backup-*.json
 
 # Supabase CLI scratch state
 supabase/.temp/
+
+# screenshot-harness output
+shots/

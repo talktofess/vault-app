@@ -122,6 +122,7 @@ function Key({
     <Pressable
       onPress={onPress}
       disabled={disabled}
+      testID={label ? `pinkey-${label}` : icon ? `pinkey-${icon}` : undefined}
       style={({ pressed }) => [
         styles.key,
         { backgroundColor: pressed ? theme.surfaceAlt : theme.surface, opacity: disabled ? 0.4 : 1 },

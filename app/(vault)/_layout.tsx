@@ -79,16 +79,16 @@ export default function VaultTabs() {
         headerShadowVisible: false,
       }}
     >
-      <Tabs.Screen name="library" options={{ title: "Vault" }} />
+      <Tabs.Screen name="library" options={{ title: "Vault", headerShown: false }} />
       {/* media / notes / files unified into Library; routes stay registered but hidden */}
       <Tabs.Screen name="media" options={{ href: null, title: "Media" }} />
       <Tabs.Screen name="notes" options={{ href: null, title: "Notes" }} />
       <Tabs.Screen name="files" options={{ href: null, title: "Files" }} />
       <Tabs.Screen name="cloud" options={{ href: null, title: "Cloud sync" }} />
-      <Tabs.Screen name="passwords" options={{ title: "Keys" }} />
+      <Tabs.Screen name="passwords" options={{ title: "Keys", headerShown: false }} />
       <Tabs.Screen name="camera" options={{ title: "Camera", href: isWeb ? null : undefined }} />
       <Tabs.Screen name="browser" options={{ title: "Browse", href: isWeb ? null : undefined }} />
-      <Tabs.Screen name="settings" options={{ title: "Settings" }} />
+      <Tabs.Screen name="settings" options={{ title: "Settings", headerShown: false }} />
     </Tabs>
   );
 }

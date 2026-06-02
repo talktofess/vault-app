@@ -2,10 +2,12 @@
 // playback speed, loop, auto-play-next, and double-tap-to-skip (±10s) on the
 // left/right thirds (the center stays free to toggle the native controls).
 import { useRef, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Platform, Pressable, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { ResizeMode, Video } from "expo-av";
 import { theme } from "./theme";
+
+const isWeb = Platform.OS === "web";
 
 const RATES = [1, 1.25, 1.5, 2, 0.5];
 
@@ -56,9 +58,15 @@ export function VideoPlayer({ uri, onRequestNext }: { uri: string; onRequestNext
         }}
       />
 
-      {/* double-tap zones (center column left free for the native controls) */}
-      <Pressable onPress={() => tapSide("l")} style={{ position: "absolute", left: 0, top: 70, bottom: 130, width: "30%" }} />
-      <Pressable onPress={() => tapSide("r")} style={{ position: "absolute", right: 0, top: 70, bottom: 130, width: "30%" }} />
+      {/* double-tap-to-skip zones — native only; on web the browser's own video
+          controls (scrub, fullscreen, volume) handle everything, so we don't
+          overlay anything that could block them. */}
+      {!isWeb && (
+        <>
+          <Pressable onPress={() => tapSide("l")} style={{ position: "absolute", left: 0, top: 70, bottom: 130, width: "30%" }} />
+          <Pressable onPress={() => tapSide("r")} style={{ position: "absolute", right: 0, top: 70, bottom: 130, width: "30%" }} />
+        </>
+      )}
 
       {/* feature controls */}
       <View style={{ position: "absolute", top: 46, right: 14, flexDirection: "row", alignItems: "center", gap: 16 }}>

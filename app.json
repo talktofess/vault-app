@@ -27,7 +27,7 @@
     },
     "android": {
       "package": "com.talktofess.vault",
-      "versionCode": 4,
+      "versionCode": 6,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0e0f13"

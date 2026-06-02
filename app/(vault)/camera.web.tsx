@@ -11,10 +11,10 @@ export default function CameraWeb() {
       <Title>Camera is mobile-only</Title>
       <Muted>
         Capturing a photo directly into the vault uses your phone&apos;s camera and
-        isn&apos;t available in the web version. On a computer, use Import on the Media
-        tab to add a photo or video from this device — it&apos;s encrypted the same way.
+        isn&apos;t available in the web version. On a computer, use “+ Add to vault” to
+        bring in a photo or video from this device — it&apos;s encrypted the same way.
       </Muted>
-      <Button label="Go to Media" onPress={() => router.replace("/(vault)/media")} />
+      <Button label="Go to Vault" onPress={() => router.replace("/(vault)/library")} />
     </Screen>
   );
 }

@@ -26,7 +26,7 @@ import { Markdown } from "../../src/ui/Markdown";
 import { VideoPlayer } from "../../src/ui/VideoPlayer";
 import { theme } from "../../src/ui/theme";
 import { makeViewableUri, releaseViewableUri, saveBytes } from "../../src/platform/io";
-import { compressImage, readFileBytes, deleteFromGallery } from "../../src/platform/media";
+import { compressImage, readFileBytes, deleteFromGallery, probeMime } from "../../src/platform/media";
 import { readBytesFromUri } from "../../src/platform/io";
 import { streamRemoteToUri } from "../../src/platform/streamMedia";
 import { syncIfLinked } from "../../src/cloud/autosync";
@@ -97,7 +97,7 @@ export default function Library() {
       if (filter !== "all" && categorize(i) !== filter) return false;
       if (q) {
         const inName = i.name.toLowerCase().includes(q);
-        const inBody = i.type === "note" && (noteBodies[i.id] ?? "").includes(q);
+        const inBody = i.type === "note" && (noteBodies[i.id] ?? "").toLowerCase().includes(q);
         if (!inName && !inBody) return false;
       }
       return true;
@@ -120,7 +120,7 @@ export default function Library() {
       const next: Record<string, string> = {};
       for (const n of missing) {
         try {
-          next[n.id] = bytesToUtf8(await vault.readItem(n.id)).toLowerCase();
+          next[n.id] = bytesToUtf8(await vault.readItem(n.id)).slice(0, 280); // original case, for snippet + search
         } catch {
           /* skip unreadable */
         }
@@ -197,27 +197,31 @@ export default function Library() {
     try {
       for (const asset of res.assets) {
         try {
+          // The web picker drops type/filename, so read the real mime off the blob.
+          const realMime = asset.mimeType ?? (await probeMime(asset.uri));
           const hint = `${asset.fileName ?? ""} ${asset.uri ?? ""}`.toLowerCase();
           const isVideo =
             asset.type === "video" ||
-            (asset.mimeType?.startsWith("video") ?? false) ||
+            (realMime?.startsWith("video") ?? false) ||
             /\.(mp4|mov|webm|m4v|mkv|avi|3gp)(\?|$)/.test(hint);
+          const isAudio = realMime?.startsWith("audio") ?? false;
           let bytes: Uint8Array;
           let mime: string | undefined;
-          if (isVideo) {
-            bytes = await readFileBytes(asset.uri); // never canvas-compress a video
-            mime = asset.mimeType ?? "video/mp4";
+          if (isVideo || isAudio) {
+            bytes = await readFileBytes(asset.uri); // never canvas-compress a/v
+            mime = realMime ?? (isVideo ? "video/mp4" : "audio/mpeg");
           } else {
-            // images are compressed; if that fails (e.g. odd format on web), store as-is
+            // images are compressed; if that fails (odd format on web), store as-is
             try {
               bytes = await compressImage(asset.uri);
               mime = "image/jpeg";
             } catch {
               bytes = await readFileBytes(asset.uri);
-              mime = asset.mimeType ?? "image/jpeg";
+              mime = realMime ?? "image/jpeg";
             }
           }
-          const name = asset.fileName ?? `media_${Date.now()}`;
+          const ext = (mime?.split("/")[1] || "bin").replace("jpeg", "jpg").replace("quicktime", "mov");
+          const name = asset.fileName ?? `${isVideo ? "video" : isAudio ? "audio" : "photo"}_${Date.now()}.${ext}`;
           await vault.addItem("media", name, bytes, { mime });
           if (asset.assetId) assetIds.push(asset.assetId);
         } catch {
@@ -756,12 +760,19 @@ export default function Library() {
                 )}
                 <View style={{ flex: 1 }}>
                   <Text numberOfLines={1} style={{ color: theme.text, fontWeight: "600" }}>
-                    {item.name}
+                    {item.name || "Untitled"}
                   </Text>
-                  <Text style={{ color: theme.muted, fontSize: 12 }}>
-                    {cat.toUpperCase()} · {fmtSize(item.size)} · {new Date(item.createdAt).toLocaleDateString()}
-                    {item.album ? ` · ${item.album}` : ""}
-                  </Text>
+                  {item.type === "note" ? (
+                    <Text numberOfLines={2} style={{ color: theme.muted, fontSize: 12, lineHeight: 17 }}>
+                      {(noteBodies[item.id] ?? "").replace(/[#*`>[\]]|- \[[ x]\]/g, "").replace(/\s+/g, " ").trim() ||
+                        "Empty note"}
+                    </Text>
+                  ) : (
+                    <Text style={{ color: theme.muted, fontSize: 12 }}>
+                      {cat.toUpperCase()} · {fmtSize(item.size)} · {new Date(item.createdAt).toLocaleDateString()}
+                      {item.album ? ` · ${item.album}` : ""}
+                    </Text>
+                  )}
                 </View>
                 {item.pinned && <Ionicons name="star" size={14} color={theme.accent} />}
                 {item.remote && (
@@ -792,6 +803,7 @@ export default function Library() {
       {!selectMode && (
         <Pressable
           onPress={() => setImportMenu(true)}
+          testID="fab-add"
           style={{
             position: "absolute",
             right: 18,
@@ -855,43 +867,50 @@ export default function Library() {
         <SheetRow icon="create-outline" label="New note" sub="Encrypted text or JSON" onPress={newNote} />
       </Sheet>
 
-      {/* image / video / audio preview — swipe through the current view */}
+      {/* image / video / audio preview — big media with a clean top bar */}
       <Modal visible={!!preview} onRequestClose={closePreview} animationType="fade">
-        <View style={{ flex: 1, backgroundColor: "#000", justifyContent: "center" }}>
-          {preview && !preview.av && <Image source={{ uri: preview.uri }} style={{ flex: 1 }} resizeMode="contain" />}
-          {preview && preview.av && <VideoPlayer uri={preview.uri} onRequestNext={() => gotoAdjacent(1)} />}
+        {preview &&
+          (() => {
+            const media = visible.filter(isPreviewable);
+            const idx = media.findIndex((m) => m.id === preview.item.id);
+            return (
+              <View style={{ flex: 1, backgroundColor: "#000" }}>
+                {/* top bar */}
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingTop: 40, paddingHorizontal: 14, paddingBottom: 10 }}>
+                  <Pressable onPress={closePreview} hitSlop={8}>
+                    <Ionicons name="close" size={28} color="#fff" />
+                  </Pressable>
+                  <View style={{ flex: 1 }}>
+                    <Text numberOfLines={1} style={{ color: "#fff", fontWeight: "700", fontSize: 16 }}>{preview.item.name}</Text>
+                    <Text style={{ color: "rgba(255,255,255,0.6)", fontSize: 12 }}>
+                      {new Date(preview.item.createdAt).toLocaleString()}
+                      {media.length > 1 ? `  ·  ${idx + 1} / ${media.length}` : ""}
+                    </Text>
+                  </View>
+                  <Pressable onPress={() => exportItem(preview.item)} hitSlop={8}>
+                    <Ionicons name="share-outline" size={24} color="#fff" />
+                  </Pressable>
+                </View>
 
-          {/* title + position */}
-          {preview && (
-            <View style={{ position: "absolute", top: 44, left: 16, right: 16, alignItems: "center" }}>
-              <Text numberOfLines={1} style={{ color: "#fff", fontWeight: "700" }}>{preview.item.name}</Text>
-              {(() => {
-                const media = visible.filter(isPreviewable);
-                const i = media.findIndex((m) => m.id === preview.item.id);
-                return media.length > 1 ? (
-                  <Text style={{ color: "rgba(255,255,255,0.6)", fontSize: 12 }}>{i + 1} / {media.length}</Text>
-                ) : null;
-              })()}
-            </View>
-          )}
+                {/* media */}
+                <View style={{ flex: 1 }}>
+                  {!preview.av && <Image source={{ uri: preview.uri }} style={{ flex: 1 }} resizeMode="contain" />}
+                  {preview.av && <VideoPlayer uri={preview.uri} onRequestNext={() => gotoAdjacent(1)} />}
 
-          {/* prev / next */}
-          <Pressable onPress={() => gotoAdjacent(-1)} hitSlop={6} style={{ position: "absolute", left: 0, top: 70, bottom: 90, width: 64, alignItems: "center", justifyContent: "center" }}>
-            <Ionicons name="chevron-back" size={36} color="rgba(255,255,255,0.6)" />
-          </Pressable>
-          <Pressable onPress={() => gotoAdjacent(1)} hitSlop={6} style={{ position: "absolute", right: 0, top: 70, bottom: 90, width: 64, alignItems: "center", justifyContent: "center" }}>
-            <Ionicons name="chevron-forward" size={36} color="rgba(255,255,255,0.6)" />
-          </Pressable>
-
-          <View style={{ padding: 20, flexDirection: "row", gap: 10 }}>
-            <View style={{ flex: 1 }}>
-              <Button label="Export" variant="outline" onPress={() => preview && exportItem(preview.item)} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Button label="Close" onPress={closePreview} />
-            </View>
-          </View>
-        </View>
+                  {media.length > 1 && (
+                    <>
+                      <Pressable onPress={() => gotoAdjacent(-1)} hitSlop={6} style={{ position: "absolute", left: 0, top: 0, bottom: 60, width: 56, alignItems: "center", justifyContent: "center" }}>
+                        <Ionicons name="chevron-back" size={34} color="rgba(255,255,255,0.55)" />
+                      </Pressable>
+                      <Pressable onPress={() => gotoAdjacent(1)} hitSlop={6} style={{ position: "absolute", right: 0, top: 0, bottom: 60, width: 56, alignItems: "center", justifyContent: "center" }}>
+                        <Ionicons name="chevron-forward" size={34} color="rgba(255,255,255,0.55)" />
+                      </Pressable>
+                    </>
+                  )}
+                </View>
+              </View>
+            );
+          })()}
       </Modal>
 
       {/* text viewer (read-only) */}

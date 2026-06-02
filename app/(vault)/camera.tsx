@@ -46,9 +46,9 @@ export default function Camera() {
       if (!uri) return;
       const bytes = await compressImage(uri); // compress before encrypting
       await vault.addItem("media", `camera_${Date.now()}.jpg`, bytes, { mime: "image/jpeg" });
-      Alert.alert("Saved", "Photo encrypted and stored in Media.", [
+      Alert.alert("Saved", "Photo encrypted and stored in your vault.", [
         { text: "Take another" },
-        { text: "Done", onPress: () => router.replace("/(vault)/media") },
+        { text: "Done", onPress: () => router.replace("/(vault)/library") },
       ]);
     } catch (e) {
       Alert.alert("Capture failed", e instanceof Error ? e.message : "Could not capture.");
@@ -86,7 +86,7 @@ export default function Camera() {
         >
           <Ionicons name="camera" size={32} color="#0e0f13" />
         </Pressable>
-        <Pressable onPress={() => router.replace("/(vault)/media")}>
+        <Pressable onPress={() => router.replace("/(vault)/library")}>
           <Ionicons name="close" size={30} color={theme.text} />
         </Pressable>
       </View>

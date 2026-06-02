@@ -44,3 +44,14 @@ export async function deleteFromGallery(_assetIds: string[]): Promise<boolean> {
   // Nothing to delete: a web file picker never imported the user's gallery.
   return true;
 }
+
+// The web image picker drops the file's type, so read it straight off the blob
+// (this is what fixes videos being imported as images).
+export async function probeMime(uri: string): Promise<string | undefined> {
+  try {
+    const blob = await (await fetch(uri)).blob();
+    return blob.type || undefined;
+  } catch {
+    return undefined;
+  }
+}

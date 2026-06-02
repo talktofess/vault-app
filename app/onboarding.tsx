@@ -41,7 +41,7 @@ export default function Onboarding() {
     try {
       await vault.create(value);
       setUnlocked(true);
-      router.replace("/(vault)/media");
+      router.replace("/(vault)/library");
     } catch (e) {
       Alert.alert("Error", e instanceof Error ? e.message : "Could not create vault");
       setFirst("");

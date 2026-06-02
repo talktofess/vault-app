@@ -23,6 +23,11 @@ export async function readFileBytes(uri: string): Promise<Uint8Array> {
   return fromB64(b64);
 }
 
+// Native gives a reliable mime via the picker, so nothing to probe here.
+export async function probeMime(_uri: string): Promise<string | undefined> {
+  return undefined;
+}
+
 // Delete the original asset(s) from the phone's gallery. The OS shows a
 // system confirmation dialog — no app can delete a user's photos silently.
 // Returns true if the user approved the deletion.

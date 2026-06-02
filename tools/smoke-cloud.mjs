@@ -22,7 +22,7 @@ async function must(label, res) {
   return res;
 }
 
-const email = `vault-smoke-${Date.now()}@example.com`;
+const email = `vault-smoke-${Date.now()}@vaultsync.app`;
 const password = "Smoke-test-12345!";
 const authHdr = { apikey: KEY, "Content-Type": "application/json" };
 
