@@ -682,6 +682,63 @@ export class VaultService {
   }
 
   /**
+   * Merge an EXISTING local vault into the shared cloud vault so this device
+   * becomes part of the one account. Re-keys every local item from the device's
+   * own DEK to the cloud DEK (recovered from the safe words), re-wraps the
+   * manifest under the verified PIN, then the caller pushes the migrated items
+   * and pulls the rest. Needed when a device was set up independently before
+   * connecting — the "one vault across devices" path.
+   */
+  async adoptCloudVault(
+    cloud: CloudStore,
+    passphrase: string,
+    pin: string
+  ): Promise<{ migrated: number }> {
+    this.requireUnlocked();
+    if (this.decoy) throw new Error("Cannot link cloud from the decoy vault");
+    const keys = await cloud.getVaultKeys();
+    if (!keys) throw new Error("No cloud vault found for these safe words");
+    const cloudDek = recoverDek(keys, passphrase);
+
+    // Verify the PIN so we can re-wrap the manifest's DEK under it.
+    const m = await this.loadManifest();
+    const mk = deriveKey(pin, fromB64(m.kdf.salt), m.kdf.iterations);
+    let pinOk = false;
+    try {
+      pinOk = bytesToUtf8(open(mk, m.verifier)) === VERIFIER_PLAINTEXT;
+    } catch {
+      pinOk = false;
+    }
+    if (!pinOk) throw new Error("Wrong PIN");
+
+    const same = cloudDek.length === this.dek!.length && cloudDek.every((b, i) => b === this.dek![i]);
+    let migrated = 0;
+    if (!same) {
+      const oldDek = this.dek!;
+      // re-encrypt each local item blob old DEK -> cloud DEK
+      for (const item of this.index!.items) {
+        const blob = await this.storage.readBlob(item.id);
+        if (!blob) continue;
+        const sealed = JSON.parse(bytesToUtf8(blob)) as Sealed;
+        await this.storage.writeBlob(item.id, utf8ToBytes(JSON.stringify(seal(cloudDek, open(oldDek, sealed)))));
+        item.remote = undefined; // force a re-push under the shared key
+        item.cached = true;
+        migrated++;
+      }
+      this.dek = cloudDek;
+      const updated: VaultManifest = {
+        ...m,
+        wrappedDek: seal(mk, cloudDek),
+        verifier: seal(mk, utf8ToBytes(VERIFIER_PLAINTEXT)),
+      };
+      await this.storage.writeManifest(JSON.stringify(updated));
+      await this.persistIndex(); // re-encrypt the index under the cloud DEK
+      if (await this.keychain.getItem(BIO_KEY)) await this.keychain.setItem(BIO_KEY, toB64(cloudDek));
+    }
+    return { migrated };
+  }
+
+  /**
    * A seekable, range-based reader over a remote item's encrypted object — the
    * basis for progressive ("watch while downloading") playback. The FK is
    * unwrapped here so the player layer never sees key material.

@@ -171,6 +171,45 @@ describe("cloud sync across two devices", () => {
     expect(await b.exists()).toBe(false); // nothing was created
   });
 
+  it("adoptCloudVault merges an independently-created device into the shared vault", async () => {
+    const { store } = fakeCloud();
+
+    // Device A: own vault + item, connects to cloud first.
+    const a = new VaultService(new MemoryStorage(), new MemoryKeychain());
+    await a.create("1111");
+    await a.addItem("note", "from-A", utf8ToBytes("alpha"));
+    await a.enableCloud(store, "shared safe words");
+    await a.pushAll(store, USER);
+
+    // Device B: SEPARATE vault (different DEK) + its own item.
+    const b = new VaultService(new MemoryStorage(), new MemoryKeychain());
+    await b.create("2222");
+    await b.addItem("note", "from-B", utf8ToBytes("bravo"));
+    expect(await b.cloudKeyMatchesLocal(store, "shared safe words")).toBe(false);
+
+    // Adopt + merge: re-key B's items to the cloud key, push them, pull A's.
+    await b.adoptCloudVault(store, "shared safe words", "2222");
+    await b.pushAll(store, USER);
+    await b.pull(store);
+
+    // B now sees BOTH items and can read each (its own cached, A's via cloud).
+    const names = b.listItems().map((i) => i.name).sort();
+    expect(names).toEqual(["from-A", "from-B"]);
+    const bOwn = b.listItems().find((i) => i.name === "from-B")!;
+    expect(bytesToUtf8(await b.readItem(bOwn.id))).toBe("bravo");
+    const aItem = b.listItems().find((i) => i.name === "from-A")!;
+    expect(bytesToUtf8(await b.fetchRemoteBytes(store, aItem.id))).toBe("alpha");
+
+    // B still unlocks with its own PIN; the key is now the shared cloud key.
+    b.lock();
+    expect(await b.unlock("2222")).toBe(true);
+
+    // A pulls and gets B's item too — one vault.
+    const { added } = await a.pull(store);
+    expect(added).toBe(1);
+    expect(a.listItems().map((i) => i.name).sort()).toEqual(["from-A", "from-B"]);
+  });
+
   it("syncIfLinked is a no-op until signed in AND linked, then pushes + pulls", async () => {
     const { store } = fakeCloud();
     const v = new VaultService(new MemoryStorage(), new MemoryKeychain());
