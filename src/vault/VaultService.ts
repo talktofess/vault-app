@@ -415,12 +415,28 @@ export class VaultService {
     const salt = randomBytes(SALT_LEN);
     const newMk = deriveKey(newPw, salt);
     const updated: VaultManifest = {
+      ...m, // preserve duress / intrusion fields
       version: 1,
       kdf: { salt: toB64(salt), iterations: KDF_ITERATIONS },
       wrappedDek: seal(newMk, dek),
       verifier: seal(newMk, utf8ToBytes(VERIFIER_PLAINTEXT)),
     };
     await this.storage.writeManifest(JSON.stringify(updated));
+    if (this.sessionPin === oldPw) this.sessionPin = newPw;
+  }
+
+  /**
+   * Propagate a PIN change to the whole account: re-wraps the shared PIN in the
+   * cloud key-set under the safe words (verified against the local key first, so
+   * a wrong passphrase can't lock other devices out). Returns false if the safe
+   * words are wrong. Other devices pick up the new PIN on their next restore/
+   * adopt; already-set-up devices keep working with the old PIN until then.
+   */
+  async updateSharedPin(cloud: CloudStore, passphrase: string, newPin: string): Promise<boolean> {
+    this.requireUnlocked();
+    if (!(await this.cloudKeyMatchesLocal(cloud, passphrase))) return false;
+    await cloud.putVaultKeys(buildVaultKeys(this.dek!, passphrase, undefined, newPin));
+    return true;
   }
 
   // ---- backup / restore ----

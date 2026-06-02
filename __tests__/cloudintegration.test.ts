@@ -214,6 +214,25 @@ describe("cloud sync across two devices", () => {
     expect(a.listItems().map((i) => i.name).sort()).toEqual(["from-A", "from-B"]);
   });
 
+  it("updateSharedPin propagates a PIN change to new devices", async () => {
+    const { store } = fakeCloud();
+    const a = new VaultService(new MemoryStorage(), new MemoryKeychain());
+    await a.create("1111");
+    await a.enableCloud(store, "shared safe words"); // stores shared PIN "1111"
+
+    // Change the PIN locally, then push it to the account.
+    await a.changePassword("1111", "9999");
+    expect(await a.updateSharedPin(store, "wrong words", "9999")).toBe(false); // doesn't clobber
+    expect(await a.updateSharedPin(store, "shared safe words", "9999")).toBe(true);
+
+    // A fresh device adopts the NEW shared PIN.
+    const b = new VaultService(new MemoryStorage(), new MemoryKeychain());
+    await b.restoreFromCloud(store, "shared safe words");
+    b.lock();
+    expect(await b.unlock("1111")).toBe(false);
+    expect(await b.unlock("9999")).toBe(true);
+  });
+
   it("syncIfLinked is a no-op until signed in AND linked, then pushes + pulls", async () => {
     const { store } = fakeCloud();
     const v = new VaultService(new MemoryStorage(), new MemoryKeychain());

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Alert, ScrollView, Text, View } from "react-native";
+import { Alert, Modal, ScrollView, Text, View } from "react-native";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
@@ -24,6 +24,12 @@ export default function Settings() {
   const [pinStep, setPinStep] = useState("");
   const [stash, setStash] = useState<{ current?: string; next?: string }>({});
 
+  // After a PIN change with cloud linked: collect safe words to update the
+  // shared PIN across all devices.
+  const [propPin, setPropPin] = useState<string | null>(null);
+  const [propWords, setPropWords] = useState("");
+  const [propBusy, setPropBusy] = useState(false);
+
   function closePinFlow() {
     setPinFlow(null);
     setPinStep("");
@@ -44,14 +50,38 @@ export default function Settings() {
         setPinStep("new");
         return;
       }
+      const newPin = stash.next!;
       try {
-        await vault.changePassword(stash.current!, stash.next!);
+        await vault.changePassword(stash.current!, newPin);
         closePinFlow();
-        Alert.alert("Done", "Your PIN has been changed.");
+        // If cloud is linked, offer to update the shared PIN on every device.
+        const linked = cloud && (await cloud.auth.currentUserId()) && (await vault.cloudEnabled(cloud.store));
+        if (linked) setPropPin(newPin);
+        else Alert.alert("Done", "Your PIN has been changed.");
       } catch (e) {
         closePinFlow();
         Alert.alert("Error", e instanceof Error ? e.message : "Failed");
       }
+    }
+  }
+
+  async function propagatePin() {
+    if (!cloud || !propPin) return;
+    setPropBusy(true);
+    try {
+      const ok = await vault.updateSharedPin(cloud.store, propWords.trim(), propPin);
+      Alert.alert(
+        ok ? "PIN updated everywhere" : "Couldn't verify safe words",
+        ok
+          ? "Your new PIN now applies to all your devices."
+          : "Those safe words didn't match, so the PIN changed on this device only. Try again from Change PIN."
+      );
+    } catch (e) {
+      Alert.alert("Couldn't update", e instanceof Error ? e.message : "Failed.");
+    } finally {
+      setPropBusy(false);
+      setPropPin(null);
+      setPropWords("");
     }
   }
 
@@ -305,6 +335,19 @@ export default function Settings() {
       onSubmit={onPinSubmit}
       onCancel={closePinFlow}
     />
+
+    {/* propagate a PIN change to all devices */}
+    <Modal visible={propPin !== null} transparent animationType="fade" onRequestClose={() => setPropPin(null)}>
+      <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", padding: 20 }}>
+        <View style={{ backgroundColor: theme.bg, borderRadius: theme.radius, borderWidth: 1, borderColor: theme.border, padding: 20, gap: 12 }}>
+          <Text style={{ color: theme.text, fontSize: 18, fontWeight: "700" }}>Update PIN everywhere?</Text>
+          <Muted>Your PIN changed on this device. Enter your safe words to make the new PIN apply to all your devices.</Muted>
+          <Field value={propWords} onChangeText={setPropWords} placeholder="Your safe words" secureTextEntry />
+          <Button label={propBusy ? "Updating…" : "Update everywhere"} onPress={propagatePin} loading={propBusy} />
+          <Button label="Just this device" variant="outline" onPress={() => { setPropPin(null); setPropWords(""); }} />
+        </View>
+      </View>
+    </Modal>
     </>
   );
 }
