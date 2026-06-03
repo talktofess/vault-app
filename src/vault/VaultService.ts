@@ -577,6 +577,30 @@ export class VaultService {
     this.requireUnlocked();
     if (this.decoy) throw new Error("Cannot enable cloud from the decoy vault");
     await cloud.putVaultKeys(buildVaultKeys(this.dek!, passphrase, undefined, this.sessionPin));
+    // This is a FRESH cloud account (no vault_keys existed). Any 'remote' refs on
+    // local items are stale — e.g. they pointed at a deleted/duplicate account —
+    // so clear them so pushAll re-uploads everything to THIS account.
+    let changed = false;
+    for (const i of this.index!.items) {
+      if (i.remote && i.cached !== false) {
+        i.remote = undefined;
+        changed = true;
+      }
+    }
+    if (changed) await this.persistIndex();
+  }
+
+  // Manual repair: forget every cloud ref and re-upload all locally-held items.
+  // Use after consolidating accounts so nothing stays stuck as "already uploaded".
+  async forcePushAll(cloud: CloudStore, userId: string): Promise<number> {
+    this.requireUnlocked();
+    for (const i of this.index!.items) {
+      if (i.cached === false) continue; // no local bytes to push
+      i.remote = undefined;
+      i.localOnly = false;
+    }
+    await this.persistIndex();
+    return this.pushAll(cloud, userId);
   }
 
   /** Recover the account's shared PIN (set on the first device), or null. */

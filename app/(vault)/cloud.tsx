@@ -140,6 +140,26 @@ export default function Cloud() {
     }
   }
 
+  // Forget cloud refs and push every local file again — repairs a sync after
+  // consolidating accounts (otherwise items stay flagged "already uploaded").
+  async function reuploadAll() {
+    setBusy("Re-uploading…");
+    try {
+      const uid = await cloud!.auth.currentUserId();
+      if (!uid) {
+        setLinked(false);
+        return;
+      }
+      const pushed = await vault.forcePushAll(cloud!.store, uid);
+      await refresh();
+      Alert.alert("Re-uploaded", `Pushed ${pushed} file${pushed === 1 ? "" : "s"} to the cloud.`);
+    } catch (e) {
+      Alert.alert("Re-upload failed", errorText(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function disconnect() {
     await cloud!.auth.signOut();
     setLinked(false);
@@ -181,6 +201,7 @@ export default function Cloud() {
             </Text>
           </View>
           <Button label={busy ?? "Sync now"} onPress={syncNow} loading={!!busy} />
+          <Button label="Re-upload all my files" variant="outline" onPress={reuploadAll} />
           <Button label="Disconnect this device" variant="outline" onPress={disconnect} />
         </Section>
       )}
