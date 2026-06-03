@@ -3,10 +3,11 @@
 // image + a "video" (video/mp4 mime), opens a note, opens the media preview.
 import { chromium } from "playwright";
 import { fileURLToPath } from "node:url";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 
 const BASE = process.env.BASE || "http://localhost:4599";
 const OUT = fileURLToPath(new URL("../shots/", import.meta.url));
+const SAMPLE_MP4 = readFileSync(fileURLToPath(new URL("./fixtures/sample.mp4", import.meta.url)));
 mkdirSync(OUT, { recursive: true });
 
 // a 2x2 red PNG
@@ -27,7 +28,9 @@ async function pin(page, p) {
   }
 }
 
-const browser = await chromium.launch();
+// Full chromium (new headless), not chromium_headless_shell: the stripped shell
+// can't complete ffmpeg.wasm's wasm-in-worker init, which the trim step needs.
+const browser = await chromium.launch({ channel: "chromium" });
 const page = await (await browser.newContext({ viewport: { width: 1280, height: 860 } })).newPage();
 page.on("console", (m) => console.log("PAGE:", m.type(), m.text().slice(0, 200)));
 page.on("pageerror", (e) => console.log("PAGEERR:", e.message));
@@ -45,11 +48,11 @@ try {
   await page.waitForTimeout(2000);
   await shot(page, "02-library-empty");
 
-  // import: image + "video", via the file chooser
+  // import: image + a real (tiny) video, via the file chooser
   page.on("filechooser", async (fc) => {
     await fc.setFiles([
       { name: "photo.png", mimeType: "image/png", buffer: PNG },
-      { name: "clip.mp4", mimeType: "video/mp4", buffer: Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]) },
+      { name: "sample.mp4", mimeType: "video/mp4", buffer: SAMPLE_MP4 }, // real 3s mp4 so the trimmer can decode/cut it
     ]);
   });
   await page.click('[data-testid="fab-add"]', { timeout: 8000 });
@@ -58,6 +61,34 @@ try {
   await page.getByText("Photos / videos").click();
   await page.waitForTimeout(3000);
   await shot(page, "04-review"); // pre-upload review screen
+
+  // --- trim the video before saving ---
+  try {
+    await page.getByText("Trim", { exact: true }).first().click({ timeout: 8000 });
+    await page.waitForTimeout(2500); // let the clip load + report its duration
+    // move the playhead to ~1.6s and mark it as the end, cutting the 3s clip down
+    await page.evaluate(() => {
+      const v = document.querySelector("video");
+      if (v) v.currentTime = 1.6;
+    });
+    await page.waitForTimeout(900);
+    await page.getByText("Set end", { exact: true }).click();
+    await page.waitForTimeout(400);
+    await shot(page, "04b-trim"); // trimmer UI with a selected range
+    await page.getByText("Done", { exact: true }).click();
+    // ffmpeg.wasm core is fetched from the CDN on first use — wait for the
+    // trimmer to close (its "Set end" control is unique to that modal).
+    await page.getByText("Set end", { exact: true }).waitFor({ state: "detached", timeout: 90000 });
+    await page.waitForTimeout(500);
+    await shot(page, "04c-trimmed"); // back on review, video size now reflects the cut
+  } catch (e) {
+    console.log("TRIM-STEP:", e.message);
+    await shot(page, "04z-trim-failed");
+    // make sure we're back on the review screen before saving
+    await page.keyboard.press("Escape").catch(() => {});
+    await page.waitForTimeout(500);
+  }
+
   await page.getByText("Save", { exact: true }).click();
   await page.waitForTimeout(2000);
   await shot(page, "05-home-tiles"); // home: category tiles

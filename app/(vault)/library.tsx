@@ -24,6 +24,8 @@ import { useVault } from "../../src/state/VaultContext";
 import { Button, Field, Muted, Screen, Title } from "../../src/ui/components";
 import { Markdown } from "../../src/ui/Markdown";
 import { VideoPlayer } from "../../src/ui/VideoPlayer";
+import { TrimModal } from "../../src/ui/TrimModal";
+import { trimSupported } from "../../src/platform/trim";
 import { theme } from "../../src/ui/theme";
 import { makeViewableUri, releaseViewableUri, saveBytes } from "../../src/platform/io";
 import { compressImage, readFileBytes, deleteFromGallery, probeMime } from "../../src/platform/media";
@@ -90,6 +92,7 @@ export default function Library() {
   const [renaming, setRenaming] = useState<VaultItem | null>(null);
   const [review, setReview] = useState<Pending[] | null>(null); // pre-upload review
   const [reviewBusy, setReviewBusy] = useState(false);
+  const [trimming, setTrimming] = useState<Pending | null>(null); // video being trimmed
   const pendingAssetIds = useRef<string[]>([]); // gallery ids to optionally delete after saving
 
   const refresh = useCallback(() => {
@@ -227,7 +230,9 @@ export default function Library() {
     const probe = { id: "", type, name, mime, size: bytes.length, createdAt: 0 } as VaultItem;
     const cat = categorize(probe);
     let uri: string | undefined;
-    if (cat === "image") {
+    // Images get a thumbnail; videos get a playable URL so the trimmer can scrub
+    // them before saving. (Both are object URLs on web, released on save/discard.)
+    if (cat === "image" || cat === "video") {
       try {
         uri = await makeViewableUri(`rev_${Math.random().toString(36).slice(2)}`, bytes, viewExt(probe));
       } catch {
@@ -358,6 +363,23 @@ export default function Library() {
     review?.forEach((p) => p.uri && void releaseViewableUri(p.uri));
     pendingAssetIds.current = [];
     setReview(null);
+  }
+  // Replace a pending video's bytes with a trimmed cut, refreshing its preview
+  // URL (the old object URL is freed) so re-opening the trimmer shows the clip.
+  async function applyTrim(key: string, out: Uint8Array) {
+    const old = review?.find((p) => p.key === key);
+    let uri: string | undefined;
+    if (old) {
+      try {
+        const probe = { id: "", type: old.type, name: old.name, mime: old.mime, size: out.length, createdAt: 0 } as VaultItem;
+        uri = await makeViewableUri(`rev_${Math.random().toString(36).slice(2)}`, out, viewExt(probe));
+      } catch {
+        /* keep playable-less */
+      }
+      if (old.uri) void releaseViewableUri(old.uri);
+    }
+    setReview((r) => (r ? r.map((p) => (p.key === key ? { ...p, bytes: out, uri } : p)) : r));
+    setTrimming(null);
   }
   async function commitReview() {
     if (!review) return;
@@ -931,7 +953,10 @@ export default function Library() {
                 </Text>
               </Pressable>
             </View>
-            <Muted>Rename or remove anything before it&apos;s saved &amp; synced. (Video trimming is coming soon.)</Muted>
+            <Muted>
+              Rename, trim or remove anything before it&apos;s saved &amp; synced.
+              {trimSupported ? " Tap Trim on a video to cut it down." : ""}
+            </Muted>
             <FlatList
               data={review}
               keyExtractor={(p) => p.key}
@@ -955,6 +980,16 @@ export default function Library() {
                       {p.cat.toUpperCase()} · {fmtSize(p.bytes.length)}{p.album ? ` · ${p.album}` : ""}
                     </Text>
                   </View>
+                  {p.cat === "video" && trimSupported && p.uri && (
+                    <Pressable
+                      onPress={() => setTrimming(p)}
+                      hitSlop={8}
+                      style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: theme.surfaceAlt, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 10 }}
+                    >
+                      <Ionicons name="cut-outline" size={16} color={theme.accent} />
+                      <Text style={{ color: theme.accent, fontWeight: "700", fontSize: 13 }}>Trim</Text>
+                    </Pressable>
+                  )}
                   <Pressable onPress={() => removeReview(p.key)} hitSlop={8}>
                     <Ionicons name="close-circle" size={24} color={theme.muted} />
                   </Pressable>
@@ -964,6 +999,18 @@ export default function Library() {
           </Screen>
         )}
       </Modal>
+
+      {/* pre-upload video trimmer */}
+      {trimming && trimming.uri && (
+        <TrimModal
+          uri={trimming.uri}
+          bytes={trimming.bytes}
+          mime={trimming.mime}
+          name={trimming.name}
+          onCancel={() => setTrimming(null)}
+          onApply={(out) => applyTrim(trimming.key, out)}
+        />
+      )}
 
       {/* image / video / audio preview — big media with a clean top bar */}
       <Modal visible={!!preview} onRequestClose={closePreview} animationType="fade">
