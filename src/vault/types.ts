@@ -41,6 +41,7 @@ export interface VaultItem {
   // ---- cloud sync (optional; absent on a purely-local item) ----
   remote?: RemoteRef; // set when a cloud copy exists
   cached?: boolean; // false = pulled-but-not-downloaded; undefined/true = blob is on-device
+  localOnly?: boolean; // user opted this item OUT of the Supabase backup (never pushed)
 }
 
 // Plaintext metadata, readable BEFORE unlock. Reveals nothing about content —

@@ -15,6 +15,9 @@ type Dest = { name: string; label: string; icon: keyof typeof Ionicons.glyphMap 
 const DESTS: Dest[] = [
   { name: "library", label: "Vault", icon: "albums-outline" },
   { name: "passwords", label: "Keys", icon: "key-outline" },
+  { name: "calendar", label: "Dates", icon: "calendar-outline" },
+  { name: "contacts", label: "People", icon: "people-outline" },
+  { name: "chats", label: "Chats", icon: "chatbubbles-outline" },
   ...(!isWeb ? ([{ name: "camera", label: "Camera", icon: "camera-outline" }] as Dest[]) : []),
   ...(!isWeb ? ([{ name: "browser", label: "Browse", icon: "globe-outline" }] as Dest[]) : []),
   { name: "settings", label: "Settings", icon: "settings-outline" },
@@ -115,6 +118,9 @@ export default function VaultTabs() {
       <Tabs.Screen name="files" options={{ href: null, title: "Files" }} />
       <Tabs.Screen name="cloud" options={{ href: null, title: "Cloud sync" }} />
       <Tabs.Screen name="passwords" options={{ title: "Keys", headerShown: false }} />
+      <Tabs.Screen name="calendar" options={{ title: "Dates", headerShown: false }} />
+      <Tabs.Screen name="contacts" options={{ title: "People", headerShown: false }} />
+      <Tabs.Screen name="chats" options={{ title: "Chats", headerShown: false }} />
       <Tabs.Screen name="camera" options={{ title: "Camera", href: isWeb ? null : undefined }} />
       <Tabs.Screen name="browser" options={{ title: "Browse", href: isWeb ? null : undefined }} />
       <Tabs.Screen name="settings" options={{ title: "Settings", headerShown: false }} />

@@ -31,6 +31,18 @@ async function pin(page, p) {
 
 // Full chromium (new headless), not chromium_headless_shell: the stripped shell
 // can't complete ffmpeg.wasm's wasm-in-worker init, which the trim step needs.
+// a vCard and a WhatsApp export for the contacts/chats import tests
+const VCF = Buffer.from(
+  "BEGIN:VCARD\nVERSION:3.0\nFN:Bob Smith\nORG:Acme\nTEL:+15551234567\nEMAIL:bob@example.com\nEND:VCARD\n" +
+    "BEGIN:VCARD\nVERSION:3.0\nFN:Alice Jones\nTEL:+15559876543\nEND:VCARD\n"
+);
+const CHAT_TXT = Buffer.from(
+  "[12/31/21, 11:58:00 PM] Bob: Hey, you around?\n" +
+    "[12/31/21, 11:59:00 PM] Me: Yeah, what's up\n" +
+    "[12/31/21, 11:59:30 PM] Bob: Happy new year!\n"
+);
+let pendingFiles = null; // set before a specific import to override the file chooser
+
 const browser = await chromium.launch({ channel: "chromium" });
 const page = await (await browser.newContext({ viewport: { width: 1280, height: 860 } })).newPage();
 page.on("console", (m) => console.log("PAGE:", m.type(), m.text().slice(0, 200)));
@@ -58,9 +70,16 @@ try {
   await page.keyboard.type("1234");
   await page.waitForTimeout(2000); // unlocks -> redirects back to the library
 
-  // file chooser: a webkitdirectory input (Whole folder) gets the fixture dir;
-  // any other file input gets the image + a real (tiny) video.
+  // file chooser: `pendingFiles` overrides for a specific import (vcf/txt); a
+  // webkitdirectory input (Whole folder) gets the fixture dir; otherwise the
+  // image + a real (tiny) video.
   page.on("filechooser", async (fc) => {
+    if (pendingFiles) {
+      const f = pendingFiles;
+      pendingFiles = null;
+      await fc.setFiles(f);
+      return;
+    }
     let isDir = false;
     try {
       isDir = await fc.element().evaluate((el) => el.webkitdirectory === true);
@@ -190,7 +209,37 @@ try {
   await page.waitForTimeout(800);
   await shot(page, "11b-imported-albums"); // the folder's subfolders became albums
 
+  // Calendar: add a birthday
+  await page.getByText("Dates", { exact: true }).first().click();
+  await page.waitForTimeout(700);
+  await page.click('[data-testid="cal-add"]');
+  await page.waitForTimeout(400);
+  await page.getByPlaceholder(/Title/).fill("Mum's birthday");
+  await page.getByText("Save", { exact: true }).click();
+  await page.waitForTimeout(700);
+  await shot(page, "12-calendar");
+
+  // Contacts: import a vCard
+  await page.getByText("People", { exact: true }).first().click();
+  await page.waitForTimeout(600);
+  pendingFiles = [{ name: "contacts.vcf", mimeType: "text/vcard", buffer: VCF }];
+  await page.click('[data-testid="contacts-import"]');
+  await page.waitForTimeout(1500);
+  await shot(page, "13-contacts");
+
+  // Chats: import a WhatsApp export and open it
+  await page.getByText("Chats", { exact: true }).first().click();
+  await page.waitForTimeout(600);
+  pendingFiles = [{ name: "WhatsApp Chat with Bob.txt", mimeType: "text/plain", buffer: CHAT_TXT }];
+  await page.click('[data-testid="chats-import"]');
+  await page.waitForTimeout(1500);
+  await page.getByText("3 messages").first().click();
+  await page.waitForTimeout(900);
+  await shot(page, "14-chat-reader");
+
   // narrow viewport: the tab bar should move to the bottom (phone layout)
+  await page.getByText("Vault", { exact: true }).first().click();
+  await page.waitForTimeout(400);
   await page.setViewportSize({ width: 390, height: 800 });
   await page.waitForTimeout(800);
   await page.click('[data-testid="tab-home"]').catch(() => {});

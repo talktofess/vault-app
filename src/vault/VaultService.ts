@@ -38,6 +38,8 @@ function newId(): string {
 
 // Storage key for an item's poster sidecar (kept local; not synced to cloud).
 const thumbId = (id: string) => `${id}__thumb`;
+// Storage key for a feature's encrypted app-data blob (calendar, contacts, …).
+const appKey = (key: string) => `__app_${key}__`;
 
 export class VaultService {
   private dek: Uint8Array | null = null; // present only while unlocked
@@ -683,7 +685,8 @@ export class VaultService {
   /** Push every local item that isn't on the cloud yet. Returns the count pushed. */
   async pushAll(cloud: CloudStore, userId: string): Promise<number> {
     this.requireUnlocked();
-    const todo = this.index!.items.filter((i) => !i.remote);
+    // Skip items the user opted out of the cloud backup (localOnly).
+    const todo = this.index!.items.filter((i) => !i.remote && !i.localOnly);
     for (const i of todo) await this.pushItem(cloud, userId, i.id);
     return todo.length;
   }
@@ -697,7 +700,9 @@ export class VaultService {
     for (const row of rows) {
       const existing = this.index!.items.find((i) => i.id === row.id);
       if (row.deletedAt) {
-        if (existing) {
+        // A cloud tombstone removes the local copy too — UNLESS the user kept it
+        // as a local-only item (they deleted just the backup).
+        if (existing && !existing.localOnly) {
           await this.storage.deleteBlob(row.id);
           this.index!.items = this.index!.items.filter((i) => i.id !== row.id);
           removed++;
@@ -886,6 +891,51 @@ export class VaultService {
     await cloud.markDeleted(id, this.nowIso());
     if (item?.remote) await cloud.removeObject(item.remote.path).catch(() => {});
     await this.deleteItem(id);
+  }
+
+  /** Remove ONLY the Supabase backup, keeping a local copy (becomes local-only).
+   *  Downloads the bytes first if they aren't already on this device. */
+  async deleteFromCloud(cloud: CloudStore, id: string): Promise<void> {
+    this.requireUnlocked();
+    const item = this.index!.items.find((i) => i.id === id);
+    if (!item || !item.remote) return; // already local-only
+    if (item.cached === false) await this.cacheItem(cloud, id); // keep the bytes locally
+    await cloud.markDeleted(id, this.nowIso());
+    await cloud.removeObject(item.remote.path).catch(() => {});
+    item.remote = undefined;
+    item.cached = true;
+    item.localOnly = true; // don't auto-re-push on the next sync
+    await this.persistIndex();
+  }
+
+  /** Opt an item back INTO the Supabase backup and push it now. */
+  async enableBackup(cloud: CloudStore, userId: string, id: string): Promise<void> {
+    this.requireUnlocked();
+    const item = this.index!.items.find((i) => i.id === id);
+    if (!item) return;
+    item.localOnly = false;
+    if (!item.remote) await this.pushItem(cloud, userId, id);
+    else await this.persistIndex();
+  }
+
+  // ---- encrypted app data (calendar, contacts, …) ----
+  // A small key→JSON store sealed under the DEK, for feature data that isn't a
+  // file. Kept local (not part of item sync); cheap to re-enter per device.
+  async getAppData<T>(key: string): Promise<T | null> {
+    this.requireUnlocked();
+    const blob = await this.storage.readBlob(appKey(key));
+    if (!blob) return null;
+    try {
+      return JSON.parse(bytesToUtf8(open(this.dek!, JSON.parse(bytesToUtf8(blob)) as Sealed))) as T;
+    } catch {
+      return null;
+    }
+  }
+
+  async setAppData(key: string, value: unknown): Promise<void> {
+    this.requireUnlocked();
+    const sealed = seal(this.dek!, utf8ToBytes(JSON.stringify(value)));
+    await this.storage.writeBlob(appKey(key), utf8ToBytes(JSON.stringify(sealed)));
   }
 
   // ---- danger ----
