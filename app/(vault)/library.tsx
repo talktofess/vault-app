@@ -62,6 +62,7 @@ type Pending = {
   album?: string;
   uri?: string; // image preview / playable video (object URL) — released on save/discard
   poster?: string; // video poster-frame (object URL) for the review thumbnail
+  posterBytes?: Uint8Array; // the same poster as bytes, stored with the item on save
   cat: FileCategory;
 };
 
@@ -280,6 +281,7 @@ export default function Library() {
     const cat = categorize(probe);
     let uri: string | undefined;
     let poster: string | undefined;
+    let posterBytes: Uint8Array | undefined;
     // Images get a thumbnail; videos get a playable URL so the trimmer can scrub
     // them before saving. (Both are object URLs on web, released on save/discard.)
     if (cat === "image" || cat === "video") {
@@ -290,15 +292,16 @@ export default function Library() {
       }
     }
     // Grab a poster frame so the review shows what the video is, not a blank box.
+    // The bytes are kept too, to store alongside the item (cheap grid previews).
     if (cat === "video" && uri && posterSupported) {
       try {
-        const pb = await makeVideoPoster(uri);
-        if (pb) poster = await makeViewableUri(`pos_${Math.random().toString(36).slice(2)}`, pb, "jpg");
+        posterBytes = (await makeVideoPoster(uri)) ?? undefined;
+        if (posterBytes) poster = await makeViewableUri(`pos_${Math.random().toString(36).slice(2)}`, posterBytes, "jpg");
       } catch {
         /* fall back to the icon */
       }
     }
-    return { key: `${name}_${Math.random().toString(36).slice(2)}`, name, bytes, mime, type, album, uri, poster, cat };
+    return { key: `${name}_${Math.random().toString(36).slice(2)}`, name, bytes, mime, type, album, uri, poster, posterBytes, cat };
   }
 
   async function importPhotos(kind: "all" | "image" | "video" = "all") {
@@ -438,13 +441,14 @@ export default function Library() {
     const old = review?.find((p) => p.key === key);
     let uri: string | undefined;
     let poster: string | undefined;
+    let posterBytes: Uint8Array | undefined;
     if (old) {
       try {
         const probe = { id: "", type: old.type, name: old.name, mime: old.mime, size: out.length, createdAt: 0 } as VaultItem;
         uri = await makeViewableUri(`rev_${Math.random().toString(36).slice(2)}`, out, viewExt(probe));
         if (uri && posterSupported) {
-          const pb = await makeVideoPoster(uri);
-          if (pb) poster = await makeViewableUri(`pos_${Math.random().toString(36).slice(2)}`, pb, "jpg");
+          posterBytes = (await makeVideoPoster(uri)) ?? undefined;
+          if (posterBytes) poster = await makeViewableUri(`pos_${Math.random().toString(36).slice(2)}`, posterBytes, "jpg");
         }
       } catch {
         /* keep playable-less */
@@ -452,7 +456,7 @@ export default function Library() {
       if (old.uri) void releaseViewableUri(old.uri);
       if (old.poster) void releaseViewableUri(old.poster);
     }
-    setReview((r) => (r ? r.map((p) => (p.key === key ? { ...p, bytes: out, uri, poster } : p)) : r));
+    setReview((r) => (r ? r.map((p) => (p.key === key ? { ...p, bytes: out, uri, poster, posterBytes } : p)) : r));
     setTrimming(null);
   }
   async function commitReview() {
@@ -460,7 +464,7 @@ export default function Library() {
     setReviewBusy(true);
     try {
       for (const p of review) {
-        await vault.addItem(p.type, p.name.trim() || "Untitled", p.bytes, { mime: p.mime, album: p.album });
+        await vault.addItem(p.type, p.name.trim() || "Untitled", p.bytes, { mime: p.mime, album: p.album, thumb: p.posterBytes });
       }
       review.forEach((p) => {
         if (p.uri) void releaseViewableUri(p.uri);
@@ -876,7 +880,7 @@ export default function Library() {
                   {cat === "image" && vault.isCached(item.id) ? (
                     <Thumb item={item} getBytes={readBytes} fill />
                   ) : cat === "video" && vault.isCached(item.id) && posterSupported ? (
-                    <VideoThumb item={item} getBytes={readBytes} fill />
+                    <VideoThumb item={item} getBytes={readBytes} getThumb={(id) => vault.readThumb(id)} fill />
                   ) : (
                     <Ionicons name={CATEGORY_ICON[cat]} size={36} color={CATEGORY_COLOR[cat]} />
                   )}
@@ -923,7 +927,7 @@ export default function Library() {
                 {cat === "image" && vault.isCached(item.id) ? (
                   <Thumb item={item} getBytes={readBytes} />
                 ) : cat === "video" && vault.isCached(item.id) && posterSupported ? (
-                  <VideoThumb item={item} getBytes={readBytes} />
+                  <VideoThumb item={item} getBytes={readBytes} getThumb={(id) => vault.readThumb(id)} />
                 ) : (
                   <View
                     style={{
@@ -1229,7 +1233,7 @@ export default function Library() {
                               {mcat === "image" && vault.isCached(m.id) ? (
                                 <Thumb item={m} getBytes={readBytes} fill />
                               ) : mcat === "video" && vault.isCached(m.id) && posterSupported ? (
-                                <VideoThumb item={m} getBytes={readBytes} fill />
+                                <VideoThumb item={m} getBytes={readBytes} getThumb={(id) => vault.readThumb(id)} fill />
                               ) : (
                                 <Ionicons name={CATEGORY_ICON[mcat]} size={18} color={CATEGORY_COLOR[mcat]} />
                               )}
@@ -1436,9 +1440,21 @@ function Thumb({ item, getBytes, fill }: { item: VaultItem; getBytes: (i: VaultI
 // doesn't re-decode a clip on every render. Released when the page unloads.
 const videoPosters = new Map<string, string>();
 
-// A video tile that shows a real poster frame (web) with a play badge; falls
-// back to the camera icon while it generates or on native.
-function VideoThumb({ item, getBytes, fill }: { item: VaultItem; getBytes: (i: VaultItem) => Promise<Uint8Array>; fill?: boolean }) {
+// A video tile that shows a real poster frame with a play badge. Prefers the
+// small poster stored with the item (cheap); only if there isn't one does it
+// fall back to decrypting the clip and grabbing a frame. Falls back to the
+// camera icon while it works or where posters aren't supported.
+function VideoThumb({
+  item,
+  getBytes,
+  getThumb,
+  fill,
+}: {
+  item: VaultItem;
+  getBytes: (i: VaultItem) => Promise<Uint8Array>;
+  getThumb?: (id: string) => Promise<Uint8Array | null>;
+  fill?: boolean;
+}) {
   const [uri, setUri] = useState<string | null>(videoPosters.get(item.id) ?? null);
   useEffect(() => {
     if (videoPosters.has(item.id)) {
@@ -1449,6 +1465,17 @@ function VideoThumb({ item, getBytes, fill }: { item: VaultItem; getBytes: (i: V
     (async () => {
       let vUri: string | null = null;
       try {
+        // 1) the stored poster sidecar — no full-video decrypt needed.
+        if (item.hasThumb && getThumb) {
+          const tb = await getThumb(item.id);
+          if (tb) {
+            const purl = await makeViewableUri(item.id + "_pos", tb, "jpg");
+            videoPosters.set(item.id, purl);
+            if (active) setUri(purl);
+            return;
+          }
+        }
+        // 2) fall back: decrypt the clip and grab a frame (older items / web).
         const data = await getBytes(item);
         vUri = await makeViewableUri(item.id + "_pv", data, viewExt(item));
         const pb = await makeVideoPoster(vUri);

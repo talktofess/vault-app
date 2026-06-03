@@ -35,6 +35,9 @@ export interface VaultItem {
   album?: string;
   // Pinned items sort to the top.
   pinned?: boolean;
+  // A small encrypted poster frame (for videos) is stored in a sidecar blob, so
+  // the grid can show a preview without decrypting the whole clip.
+  hasThumb?: boolean;
   // ---- cloud sync (optional; absent on a purely-local item) ----
   remote?: RemoteRef; // set when a cloud copy exists
   cached?: boolean; // false = pulled-but-not-downloaded; undefined/true = blob is on-device

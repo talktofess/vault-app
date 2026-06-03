@@ -36,6 +36,9 @@ function newId(): string {
   return toB64(randomBytes(12)).replace(/[+/=]/g, "").slice(0, 16);
 }
 
+// Storage key for an item's poster sidecar (kept local; not synced to cloud).
+const thumbId = (id: string) => `${id}__thumb`;
+
 export class VaultService {
   private dek: Uint8Array | null = null; // present only while unlocked
   private index: VaultIndex | null = null;
@@ -301,6 +304,7 @@ export class VaultService {
       createdAt?: number;
       sourceUrl?: string;
       album?: string;
+      thumb?: Uint8Array; // optional poster frame (videos) — stored encrypted in a sidecar
     } = {}
   ): Promise<VaultItem> {
     this.requireUnlocked();
@@ -314,9 +318,13 @@ export class VaultService {
       sourceUrl: opts.sourceUrl,
       album: opts.album,
       createdAt: opts.createdAt ?? nowMs(),
+      hasThumb: !!opts.thumb,
     };
     const sealed = seal(this.dek!, data);
     await this.storage.writeBlob(item.id, utf8ToBytes(JSON.stringify(sealed)));
+    if (opts.thumb && opts.thumb.length > 0) {
+      await this.storage.writeBlob(thumbId(item.id), utf8ToBytes(JSON.stringify(seal(this.dek!, opts.thumb))));
+    }
     this.index!.items.push(item);
     await this.persistIndex();
     return item;
@@ -330,9 +338,22 @@ export class VaultService {
     return open(this.dek!, sealed);
   }
 
+  // The decrypted poster frame for a video, or null if it has none.
+  async readThumb(id: string): Promise<Uint8Array | null> {
+    this.requireUnlocked();
+    const blob = await this.storage.readBlob(thumbId(id));
+    if (!blob) return null;
+    try {
+      return open(this.dek!, JSON.parse(bytesToUtf8(blob)) as Sealed);
+    } catch {
+      return null;
+    }
+  }
+
   async deleteItem(id: string): Promise<void> {
     this.requireUnlocked();
     await this.storage.deleteBlob(id);
+    await this.storage.deleteBlob(thumbId(id)).catch(() => {});
     this.index!.items = this.index!.items.filter((i) => i.id !== id);
     await this.persistIndex();
   }
