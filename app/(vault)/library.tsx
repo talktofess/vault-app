@@ -34,6 +34,7 @@ import { compressImage, readFileBytes, deleteFromGallery, probeMime } from "../.
 import { readBytesFromUri } from "../../src/platform/io";
 import { streamRemoteToUri } from "../../src/platform/streamMedia";
 import { syncIfLinked } from "../../src/cloud/autosync";
+import { errorText } from "../../src/cloud/errors";
 import { folderImportSupported, pickFolder } from "../../src/platform/folderPicker";
 import { bytesToUtf8, utf8ToBytes } from "../../src/crypto/b64";
 import {
@@ -719,7 +720,7 @@ export default function Library() {
           else Alert.alert("Synced", `Pushed ${res.pushed}, pulled ${res.added} new, removed ${res.removed}.`);
         }
       } catch (e) {
-        if (!silent) Alert.alert("Sync failed", e instanceof Error ? e.message : "Failed.");
+        if (!silent) Alert.alert("Sync failed", errorText(e));
       } finally {
         syncingRef.current = false;
         setSyncing(false);

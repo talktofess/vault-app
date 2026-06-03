@@ -10,26 +10,9 @@ import { Button, Field, Muted, Title } from "../../src/ui/components";
 import { theme } from "../../src/ui/theme";
 import { ensureSignedIn } from "../../src/cloud/account";
 import { SUPABASE_URL } from "../../src/cloud/supabase";
+import { errorText } from "../../src/cloud/errors";
 
 const MIN_WORDS = 10;
-
-// Supabase's Postgrest errors are plain objects (NOT Error instances), so a bare
-// `e instanceof Error` check hides them as "Something went wrong". Pull a real
-// message from whatever was thrown.
-function errorText(e: unknown): string {
-  if (e instanceof Error) return e.message;
-  if (e && typeof e === "object") {
-    const o = e as Record<string, unknown>;
-    const m = o.message ?? o.error_description ?? o.error ?? o.hint ?? o.details;
-    if (typeof m === "string" && m) return m;
-    try {
-      return JSON.stringify(o);
-    } catch {
-      /* fall through */
-    }
-  }
-  return e ? String(e) : "Something went wrong.";
-}
 
 export default function Cloud() {
   const { vault, cloud, unlocked } = useVault();
@@ -139,7 +122,7 @@ export default function Cloud() {
       const { added, removed } = await vault.pull(cloud!.store);
       Alert.alert("Synced", `Pushed ${pushed}, pulled ${added} new, removed ${removed}.`);
     } catch (e) {
-      Alert.alert("Sync failed", e instanceof Error ? e.message : "Failed.");
+      Alert.alert("Sync failed", errorText(e));
     } finally {
       setBusy(null);
     }
