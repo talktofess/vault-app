@@ -13,9 +13,11 @@ create table if not exists public.vault_keys (
   updated_at   timestamptz not null default now()
 );
 
--- One row per item. Names/mime/album are encrypted inside enc_meta.
+-- One row per item. The id is the CLIENT-generated item id (a short opaque
+-- string, NOT a uuid) — the app owns ids (they key the local index, blobs and
+-- storage paths), so this column is text. Names/mime/album live in enc_meta.
 create table if not exists public.items (
-  id            uuid primary key default gen_random_uuid(),
+  id            text primary key,
   user_id       uuid not null references auth.users(id) on delete cascade,
   enc_meta      text   not null,
   wrapped_fk    text   not null,
