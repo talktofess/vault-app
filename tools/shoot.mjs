@@ -35,6 +35,7 @@ const browser = await chromium.launch({ channel: "chromium" });
 const page = await (await browser.newContext({ viewport: { width: 1280, height: 860 } })).newPage();
 page.on("console", (m) => console.log("PAGE:", m.type(), m.text().slice(0, 200)));
 page.on("pageerror", (e) => console.log("PAGEERR:", e.message));
+page.on("dialog", (d) => d.accept().catch(() => {})); // dismiss Alert.alert popups
 
 try {
   await page.goto(BASE, { waitUntil: "load" });
@@ -183,10 +184,8 @@ try {
   await page.click('[data-testid="fab-add"]'); // round + opens the full menu on Home
   await page.waitForTimeout(400);
   await page.getByText("Whole folder").click();
-  await page.waitForTimeout(3000); // directory read + review screen
-  await shot(page, "11-folder-import-review");
-  await page.getByText("Save", { exact: true }).click();
-  await page.waitForTimeout(2000);
+  await page.waitForTimeout(5000); // streams the directory's files straight in
+  await shot(page, "11-folder-imported");
   await page.click('[data-testid="tab-folders"]');
   await page.waitForTimeout(800);
   await shot(page, "11b-imported-albums"); // the folder's subfolders became albums

@@ -409,8 +409,14 @@ export default function Library() {
     if (pend.length) setReview(pend);
   }
 
+  // Whole-folder import. A real folder can hold hundreds of files of every kind
+  // (and nested subfolders), so we DON'T route it through the review screen or
+  // hold it all in memory: we read + encrypt + store one file at a time, keeping
+  // each subfolder as its own album, and report the result. Failures are
+  // surfaced (it used to silently add nothing).
   async function importFolder() {
     setImportMenu(false);
+    const baseAlbum = currentAlbum ?? ""; // if inside a folder, nest under it
     let files;
     try {
       files = await pickFolder();
@@ -418,24 +424,52 @@ export default function Library() {
       Alert.alert("Couldn't read folder", e instanceof Error ? e.message : "Failed.");
       return;
     }
-    if (!files.length) return;
-    setBusy(`Reading ${files.length} file${files.length === 1 ? "" : "s"}…`);
-    const pend: Pending[] = [];
+    if (!files.length) return; // cancelled
+
+    let added = 0;
+    let failed = 0;
+    const newAlbums = new Set<string>();
     try {
-      for (const f of files) {
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        setBusy(`Importing ${i + 1} / ${files.length}…`);
         try {
+          const bytes = await f.read();
           const m = f.mime ?? "";
           const type = m.startsWith("image") || m.startsWith("video") || m.startsWith("audio") ? "media" : "file";
-          const dir = f.relPath.split("/").slice(0, -1).join(" / "); // subfolders -> album
-          pend.push(await toPending(f.name, f.bytes, f.mime, type, dir || undefined));
+          // subfolders -> album; drop the chosen folder's own top segment is kept
+          const sub = f.relPath.split("/").slice(0, -1).join(" / ");
+          const album = [baseAlbum, sub].filter(Boolean).join(" / ") || undefined;
+          if (album) newAlbums.add(album);
+          // a poster for videos (sequential, so memory stays bounded)
+          let thumb: Uint8Array | undefined;
+          const probe = { id: "", type, name: f.name, mime: f.mime, size: bytes.length, createdAt: 0 } as VaultItem;
+          if (categorize(probe) === "video" && posterSupported) {
+            try {
+              const u = await makeViewableUri(`fi_${i}`, bytes, viewExt(probe));
+              thumb = (await makeVideoPoster(u)) ?? undefined;
+              releaseViewableUri(u);
+            } catch {
+              /* no poster */
+            }
+          }
+          await vault.addItem(type, f.name, bytes, { mime: f.mime, album, thumb });
+          added++;
         } catch {
-          /* skip */
+          failed++;
         }
       }
+      // remember the (sub)folders so they persist even if later emptied
+      for (const a of newAlbums) await vault.createFolder(a).catch(() => {});
     } finally {
       setBusy(null);
     }
-    if (pend.length) setReview(pend);
+    refresh();
+    void runSync(true);
+    Alert.alert(
+      "Folder imported",
+      `Added ${added} file${added === 1 ? "" : "s"}${failed ? `, ${failed} skipped` : ""} — encrypted in your vault.`
+    );
   }
 
   // ---- review actions ----

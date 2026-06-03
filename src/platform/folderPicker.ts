@@ -3,9 +3,9 @@
 // the Library hides the option. (Native users multi-select files instead.)
 export interface PickedFile {
   name: string;
-  bytes: Uint8Array;
   mime?: string;
   relPath: string; // path within the chosen folder, e.g. "trip/sub/img.jpg"
+  read: () => Promise<Uint8Array>;
 }
 
 export const folderImportSupported = false;

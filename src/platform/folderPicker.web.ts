@@ -10,9 +10,12 @@
 // dropped — which is exactly why "whole folder" appeared to do nothing.
 export interface PickedFile {
   name: string;
-  bytes: Uint8Array;
   mime?: string;
   relPath: string; // webkitRelativePath, e.g. "trip/sub/img.jpg"
+  // Read this one file's bytes on demand. Reading lazily (one at a time, as the
+  // importer stores each file) keeps a big folder from loading entirely into
+  // memory at once.
+  read: () => Promise<Uint8Array>;
 }
 
 export const folderImportSupported = true;
@@ -35,23 +38,17 @@ export async function pickFolder(): Promise<PickedFile[]> {
     };
 
     input.addEventListener("change", () => {
-      const files = Array.from(input.files ?? []);
-      void (async () => {
-        try {
-          const out: PickedFile[] = [];
-          for (const f of files) {
-            out.push({
-              name: f.name,
-              bytes: new Uint8Array(await f.arrayBuffer()),
-              mime: f.type || undefined,
-              relPath: (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name,
-            });
-          }
-          finish(() => resolve(out));
-        } catch (e) {
-          finish(() => reject(e instanceof Error ? e : new Error("Folder read failed")));
-        }
-      })();
+      try {
+        const out: PickedFile[] = Array.from(input.files ?? []).map((f) => ({
+          name: f.name,
+          mime: f.type || undefined,
+          relPath: (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name,
+          read: async () => new Uint8Array(await f.arrayBuffer()),
+        }));
+        finish(() => resolve(out));
+      } catch (e) {
+        finish(() => reject(e instanceof Error ? e : new Error("Folder read failed")));
+      }
     });
 
     // Modern browsers fire 'cancel' when the dialog is dismissed with no choice.
