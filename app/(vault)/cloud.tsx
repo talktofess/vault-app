@@ -13,6 +13,24 @@ import { SUPABASE_URL } from "../../src/cloud/supabase";
 
 const MIN_WORDS = 10;
 
+// Supabase's Postgrest errors are plain objects (NOT Error instances), so a bare
+// `e instanceof Error` check hides them as "Something went wrong". Pull a real
+// message from whatever was thrown.
+function errorText(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (e && typeof e === "object") {
+    const o = e as Record<string, unknown>;
+    const m = o.message ?? o.error_description ?? o.error ?? o.hint ?? o.details;
+    if (typeof m === "string" && m) return m;
+    try {
+      return JSON.stringify(o);
+    } catch {
+      /* fall through */
+    }
+  }
+  return e ? String(e) : "Something went wrong.";
+}
+
 export default function Cloud() {
   const { vault, cloud, unlocked } = useVault();
   const [linked, setLinked] = useState(false);
@@ -84,11 +102,18 @@ export default function Cloud() {
   }
 
   function handleConnectError(e: unknown) {
-    const msg = e instanceof Error ? e.message : "Something went wrong.";
+    const msg = errorText(e);
     if (/failed to fetch|network ?request ?failed|load failed|networkerror/i.test(msg)) {
       Alert.alert(
         "Can't reach the cloud",
         `Couldn't connect to ${SUPABASE_URL}.\n\n• Check your internet connection.\n• If you set EXPO_PUBLIC_SUPABASE_URL on Vercel, it must be the API URL (https://<ref>.supabase.co) — NOT the dashboard link.\n\nThen hard-refresh and try again.`
+      );
+      return;
+    }
+    if (/permission denied|42501/i.test(msg)) {
+      Alert.alert(
+        "Cloud setup incomplete",
+        "The database is missing table permissions. In Supabase → SQL Editor, run this once, then try again:\n\ngrant usage on schema public to authenticated;\ngrant select, insert, update, delete on public.vault_keys to authenticated;\ngrant select, insert, update, delete on public.items to authenticated;"
       );
       return;
     }
@@ -97,9 +122,9 @@ export default function Cloud() {
         "Turn off email confirmation",
         "This project still requires email confirmation, which blocks the safe-words sign-in. In Supabase: Authentication → Providers → Email → turn OFF “Confirm email”, then try again."
       );
-    } else {
-      Alert.alert("Couldn't connect", msg);
+      return;
     }
+    Alert.alert("Couldn't connect", msg);
   }
 
   async function syncNow() {
