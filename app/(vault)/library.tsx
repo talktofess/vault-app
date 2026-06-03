@@ -42,13 +42,24 @@ import {
   isTextLike,
   viewExt,
 } from "../../src/vault/filetypes";
-import type { VaultItem } from "../../src/vault/types";
+import type { ItemType, VaultItem } from "../../src/vault/types";
 
 type Sort = "new" | "name" | "size";
 type Preview = { uri: string; item: VaultItem; av: boolean; release: () => Promise<void> | void };
 type NoteEdit = { item?: VaultItem; name: string; body: string; json: boolean };
 type TextView = { item: VaultItem; body: string };
 type AlbumTarget = { ids: string[] };
+// An item picked but not yet saved — shown in the pre-upload review.
+type Pending = {
+  key: string;
+  name: string;
+  bytes: Uint8Array;
+  mime?: string;
+  type: ItemType;
+  album?: string;
+  uri?: string; // image preview (object URL) — released on save/discard
+  cat: FileCategory;
+};
 
 export default function Library() {
   const { vault, unlocked, cloud } = useVault();
@@ -76,6 +87,9 @@ export default function Library() {
   const [albumTarget, setAlbumTarget] = useState<AlbumTarget | null>(null);
   const [currentAlbum, setCurrentAlbum] = useState<string | null>(null); // open folder
   const [renaming, setRenaming] = useState<VaultItem | null>(null);
+  const [review, setReview] = useState<Pending[] | null>(null); // pre-upload review
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const pendingAssetIds = useRef<string[]>([]); // gallery ids to optionally delete after saving
 
   const refresh = useCallback(() => {
     if (unlocked) setItems(vault.listItems().filter((i) => i.type !== "credential"));
@@ -182,7 +196,22 @@ export default function Library() {
     refresh();
   }
 
-  // ---- import ----
+  // ---- import: pick -> review -> save ----
+  // Build a not-yet-saved item (with an image preview) for the review screen.
+  async function toPending(name: string, bytes: Uint8Array, mime: string | undefined, type: ItemType, album?: string): Promise<Pending> {
+    const probe = { id: "", type, name, mime, size: bytes.length, createdAt: 0 } as VaultItem;
+    const cat = categorize(probe);
+    let uri: string | undefined;
+    if (cat === "image") {
+      try {
+        uri = await makeViewableUri(`rev_${Math.random().toString(36).slice(2)}`, bytes, viewExt(probe));
+      } catch {
+        /* no preview */
+      }
+    }
+    return { key: `${name}_${Math.random().toString(36).slice(2)}`, name, bytes, mime, type, album, uri, cat };
+  }
+
   async function importPhotos() {
     setImportMenu(false);
     const res = await ImagePicker.launchImageLibraryAsync({
@@ -191,9 +220,9 @@ export default function Library() {
       allowsMultipleSelection: true,
     });
     if (res.canceled) return;
-    setBusy("Importing media…");
-    const assetIds: string[] = [];
-    let failed = 0;
+    setBusy("Reading…");
+    const pend: Pending[] = [];
+    const ids: string[] = [];
     try {
       for (const asset of res.assets) {
         try {
@@ -211,7 +240,6 @@ export default function Library() {
             bytes = await readFileBytes(asset.uri); // never canvas-compress a/v
             mime = realMime ?? (isVideo ? "video/mp4" : "audio/mpeg");
           } else {
-            // images are compressed; if that fails (odd format on web), store as-is
             try {
               bytes = await compressImage(asset.uri);
               mime = "image/jpeg";
@@ -222,60 +250,43 @@ export default function Library() {
           }
           const ext = (mime?.split("/")[1] || "bin").replace("jpeg", "jpg").replace("quicktime", "mov");
           const name = asset.fileName ?? `${isVideo ? "video" : isAudio ? "audio" : "photo"}_${Date.now()}.${ext}`;
-          await vault.addItem("media", name, bytes, { mime });
-          if (asset.assetId) assetIds.push(asset.assetId);
+          pend.push(await toPending(name, bytes, mime, "media"));
+          if (asset.assetId) ids.push(asset.assetId);
         } catch {
-          failed++;
+          /* skip unreadable */
         }
       }
-      refresh();
-      void runSync(true); // auto-upload new items when cloud is linked
-      if (failed > 0) Alert.alert("Some items skipped", `${failed} item${failed === 1 ? "" : "s"} couldn't be read and ${failed === 1 ? "was" : "were"} skipped.`);
-      if (assetIds.length > 0) {
-        Alert.alert("Remove originals?", "Delete the imported items from your device gallery? They're safely stored here.", [
-          { text: "Keep", style: "cancel" },
-          { text: "Delete from gallery", style: "destructive", onPress: () => deleteFromGallery(assetIds) },
-        ]);
-      }
-    } catch (e) {
-      Alert.alert("Import failed", e instanceof Error ? e.message : "Could not import.");
     } finally {
       setBusy(null);
     }
+    pendingAssetIds.current = ids;
+    if (pend.length) setReview(pend);
   }
 
   async function importFiles() {
     setImportMenu(false);
     const res = await DocumentPicker.getDocumentAsync({ multiple: true, copyToCacheDirectory: true });
     if (res.canceled) return;
-    setBusy("Importing files…");
-    let failed = 0;
+    setBusy("Reading…");
+    const pend: Pending[] = [];
     try {
       for (const asset of res.assets) {
         try {
           const bytes = await readBytesFromUri(asset.uri);
-          // Infer the APK mime so Android offers "install" when this is exported.
           const mime =
             asset.mimeType ??
-            (asset.name.toLowerCase().endsWith(".apk")
-              ? "application/vnd.android.package-archive"
-              : undefined);
-          // Photos/videos/audio go in as media so they preview + thumbnail.
+            (asset.name.toLowerCase().endsWith(".apk") ? "application/vnd.android.package-archive" : undefined);
           const m = mime ?? "";
           const type = m.startsWith("image") || m.startsWith("video") || m.startsWith("audio") ? "media" : "file";
-          await vault.addItem(type, asset.name, bytes, { mime });
+          pend.push(await toPending(asset.name, bytes, mime, type));
         } catch {
-          failed++;
+          /* skip */
         }
       }
-      refresh();
-      void runSync(true);
-      if (failed > 0) Alert.alert("Some files skipped", `${failed} file${failed === 1 ? "" : "s"} couldn't be read.`);
-    } catch (e) {
-      Alert.alert("Import failed", e instanceof Error ? e.message : "Could not import.");
     } finally {
       setBusy(null);
     }
+    if (pend.length) setReview(pend);
   }
 
   async function importFolder() {
@@ -284,31 +295,68 @@ export default function Library() {
     try {
       files = await pickFolder();
     } catch (e) {
-      Alert.alert("Import failed", e instanceof Error ? e.message : "Could not read the folder.");
+      Alert.alert("Couldn't read folder", e instanceof Error ? e.message : "Failed.");
       return;
     }
     if (!files.length) return;
-    setBusy(`Importing ${files.length} file${files.length === 1 ? "" : "s"}…`);
-    let failed = 0;
+    setBusy(`Reading ${files.length} file${files.length === 1 ? "" : "s"}…`);
+    const pend: Pending[] = [];
     try {
       for (const f of files) {
         try {
           const m = f.mime ?? "";
           const type = m.startsWith("image") || m.startsWith("video") || m.startsWith("audio") ? "media" : "file";
-          // preserve the folder layout: subfolders become the album
-          const dir = f.relPath.split("/").slice(0, -1).join(" / ");
-          await vault.addItem(type, f.name, f.bytes, { mime: f.mime, album: dir || undefined });
+          const dir = f.relPath.split("/").slice(0, -1).join(" / "); // subfolders -> album
+          pend.push(await toPending(f.name, f.bytes, f.mime, type, dir || undefined));
         } catch {
-          failed++;
+          /* skip */
         }
       }
-      refresh();
-      void runSync(true);
-      Alert.alert("Folder imported", `Added ${files.length - failed} file${files.length - failed === 1 ? "" : "s"}${failed ? `, skipped ${failed}` : ""}.`);
-    } catch (e) {
-      Alert.alert("Import failed", e instanceof Error ? e.message : "Could not import the folder.");
     } finally {
       setBusy(null);
+    }
+    if (pend.length) setReview(pend);
+  }
+
+  // ---- review actions ----
+  function setReviewName(key: string, name: string) {
+    setReview((r) => (r ? r.map((p) => (p.key === key ? { ...p, name } : p)) : r));
+  }
+  function removeReview(key: string) {
+    setReview((r) => {
+      const it = r?.find((p) => p.key === key);
+      if (it?.uri) void releaseViewableUri(it.uri);
+      return r ? r.filter((p) => p.key !== key) : r;
+    });
+  }
+  function discardReview() {
+    review?.forEach((p) => p.uri && void releaseViewableUri(p.uri));
+    pendingAssetIds.current = [];
+    setReview(null);
+  }
+  async function commitReview() {
+    if (!review) return;
+    setReviewBusy(true);
+    try {
+      for (const p of review) {
+        await vault.addItem(p.type, p.name.trim() || "Untitled", p.bytes, { mime: p.mime, album: p.album });
+      }
+      review.forEach((p) => p.uri && void releaseViewableUri(p.uri));
+      setReview(null);
+      refresh();
+      void runSync(true);
+      const ids = pendingAssetIds.current;
+      pendingAssetIds.current = [];
+      if (ids.length > 0) {
+        Alert.alert("Remove originals?", "Delete the imported items from your device gallery? They're safely stored here.", [
+          { text: "Keep", style: "cancel" },
+          { text: "Delete from gallery", style: "destructive", onPress: () => deleteFromGallery(ids) },
+        ]);
+      }
+    } catch (e) {
+      Alert.alert("Couldn't save", e instanceof Error ? e.message : "Failed.");
+    } finally {
+      setReviewBusy(false);
     }
   }
 
@@ -866,6 +914,57 @@ export default function Library() {
         <SheetRow icon="camera-outline" label="Camera" sub="Capture straight into the vault" onPress={goCamera} />
         <SheetRow icon="create-outline" label="New note" sub="Encrypted text or JSON" onPress={newNote} />
       </Sheet>
+
+      {/* pre-upload review: rename / remove before saving */}
+      <Modal visible={!!review} animationType="slide" onRequestClose={discardReview}>
+        {review && (
+          <Screen>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <Pressable onPress={discardReview} hitSlop={8}>
+                <Text style={{ color: theme.muted, fontSize: 16 }}>Cancel</Text>
+              </Pressable>
+              <Text style={{ color: theme.text, fontSize: 16, fontWeight: "700" }}>
+                Review {review.length} item{review.length === 1 ? "" : "s"}
+              </Text>
+              <Pressable onPress={commitReview} hitSlop={8} disabled={reviewBusy || review.length === 0}>
+                <Text style={{ color: review.length && !reviewBusy ? theme.accent : theme.muted, fontSize: 16, fontWeight: "700" }}>
+                  {reviewBusy ? "Saving…" : "Save"}
+                </Text>
+              </Pressable>
+            </View>
+            <Muted>Rename or remove anything before it&apos;s saved &amp; synced. (Video trimming is coming soon.)</Muted>
+            <FlatList
+              data={review}
+              keyExtractor={(p) => p.key}
+              contentContainerStyle={{ gap: 8, paddingBottom: 30 }}
+              renderItem={({ item: p }) => (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: theme.surface, borderRadius: theme.radius, borderWidth: 1, borderColor: theme.border, padding: 10 }}>
+                  {p.cat === "image" && p.uri ? (
+                    <Image source={{ uri: p.uri }} style={{ width: 48, height: 48, borderRadius: 10 }} resizeMode="cover" />
+                  ) : (
+                    <View style={{ width: 48, height: 48, borderRadius: 10, backgroundColor: CATEGORY_COLOR[p.cat] + "22", alignItems: "center", justifyContent: "center" }}>
+                      <Ionicons name={CATEGORY_ICON[p.cat]} size={24} color={CATEGORY_COLOR[p.cat]} />
+                    </View>
+                  )}
+                  <View style={{ flex: 1 }}>
+                    <TextInput
+                      value={p.name}
+                      onChangeText={(t) => setReviewName(p.key, t)}
+                      style={{ color: theme.text, fontSize: 15, fontWeight: "600", paddingVertical: 2 }}
+                    />
+                    <Text style={{ color: theme.muted, fontSize: 11 }}>
+                      {p.cat.toUpperCase()} · {fmtSize(p.bytes.length)}{p.album ? ` · ${p.album}` : ""}
+                    </Text>
+                  </View>
+                  <Pressable onPress={() => removeReview(p.key)} hitSlop={8}>
+                    <Ionicons name="close-circle" size={24} color={theme.muted} />
+                  </Pressable>
+                </View>
+              )}
+            />
+          </Screen>
+        )}
+      </Modal>
 
       {/* image / video / audio preview — big media with a clean top bar */}
       <Modal visible={!!preview} onRequestClose={closePreview} animationType="fade">

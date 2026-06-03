@@ -57,14 +57,16 @@ try {
   await shot(page, "03-add-menu");
   await page.getByText("Photos / videos").click();
   await page.waitForTimeout(3000);
-  await shot(page, "04-after-import");
+  await shot(page, "04-review"); // pre-upload review screen
+  await page.getByText("Save", { exact: true }).click();
+  await page.waitForTimeout(2000);
+  await shot(page, "05-after-save"); // library with the saved items
 
   // open the image (preview layout)
   await page.getByText("photo.png", { exact: false }).first().click();
   await page.waitForTimeout(1500);
-  await shot(page, "05-preview");
-  // close preview — the X is top-left
-  await page.mouse.click(28, 58);
+  await shot(page, "06-preview");
+  await page.mouse.click(28, 58); // close (X top-left)
   await page.waitForTimeout(800);
 
   // create a note, then see it in the list (title + body snippet)
@@ -75,7 +77,6 @@ try {
   await page.getByPlaceholder("Title").fill("Shopping list");
   await page.getByPlaceholder(/Start writing/).fill("- [ ] milk\n- [x] eggs\nGet bread too");
   await page.waitForTimeout(300);
-  await shot(page, "06-note-editor");
   await page.getByText("Save", { exact: true }).click();
   await page.waitForTimeout(1200);
   await shot(page, "07-note-in-list");
