@@ -1,14 +1,16 @@
-import { Platform, Pressable, Text, View } from "react-native";
+import { Platform, Pressable, Text, useWindowDimensions, View } from "react-native";
 import { Redirect, Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useVault } from "../../src/state/VaultContext";
 import { theme } from "../../src/ui/theme";
 
 const isWeb = Platform.OS === "web";
-const RAIL = 76; // width of the vertical tab rail
+const RAIL = 76; // width of the vertical tab rail (wide screens)
+const BAR = 62; // height of the bottom tab bar (narrow screens / phones)
+const NARROW = 720; // below this width, use a bottom bar instead of the side rail
 
-// The visible destinations, in order, for the side rail. (Hidden routes like
-// media/notes/files/cloud aren't listed; camera/browser are native-only.)
+// The visible destinations, in order. (Hidden routes like media/notes/files/
+// cloud aren't listed; camera/browser are native-only.)
 type Dest = { name: string; label: string; icon: keyof typeof Ionicons.glyphMap };
 const DESTS: Dest[] = [
   { name: "library", label: "Vault", icon: "albums-outline" },
@@ -18,10 +20,54 @@ const DESTS: Dest[] = [
   { name: "settings", label: "Settings", icon: "settings-outline" },
 ];
 
-// Vertical tab rail on the left, replacing the default bottom bar.
+// One tab bar that adapts: a slim bottom bar on phones/narrow windows (so it
+// doesn't eat horizontal space), a vertical rail on wide screens.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function SideRail({ state, navigation }: any) {
+function AppTabBar({ state, navigation, bottom }: any) {
   const activeName: string | undefined = state.routes[state.index]?.name;
+  const items = DESTS.map((d) => {
+    const focused = activeName === d.name;
+    return (
+      <Pressable
+        key={d.name}
+        onPress={() => navigation.navigate(d.name)}
+        style={{
+          flex: bottom ? 1 : undefined,
+          marginHorizontal: bottom ? 0 : 8,
+          paddingVertical: bottom ? 6 : 12,
+          borderRadius: theme.radiusSm,
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 3,
+          backgroundColor: !bottom && focused ? theme.surfaceAlt : "transparent",
+        }}
+      >
+        <Ionicons name={d.icon} size={focused ? 23 : 22} color={focused ? theme.accent : theme.muted} />
+        <Text style={{ color: focused ? theme.accent : theme.muted, fontSize: 10, fontWeight: "600" }}>{d.label}</Text>
+      </Pressable>
+    );
+  });
+
+  if (bottom) {
+    return (
+      <View
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: BAR,
+          flexDirection: "row",
+          alignItems: "center",
+          backgroundColor: theme.bgElevated,
+          borderTopWidth: 1,
+          borderTopColor: theme.border,
+        }}
+      >
+        {items}
+      </View>
+    );
+  }
   return (
     <View
       style={{
@@ -37,32 +83,15 @@ function SideRail({ state, navigation }: any) {
         gap: 4,
       }}
     >
-      {DESTS.map((d) => {
-        const focused = activeName === d.name;
-        return (
-          <Pressable
-            key={d.name}
-            onPress={() => navigation.navigate(d.name)}
-            style={{
-              marginHorizontal: 8,
-              paddingVertical: 12,
-              borderRadius: theme.radiusSm,
-              alignItems: "center",
-              gap: 4,
-              backgroundColor: focused ? theme.surfaceAlt : "transparent",
-            }}
-          >
-            <Ionicons name={d.icon} size={22} color={focused ? theme.accent : theme.muted} />
-            <Text style={{ color: focused ? theme.accent : theme.muted, fontSize: 10, fontWeight: "600" }}>{d.label}</Text>
-          </Pressable>
-        );
-      })}
+      {items}
     </View>
   );
 }
 
 export default function VaultTabs() {
   const { unlocked } = useVault();
+  const { width } = useWindowDimensions();
+  const bottom = width < NARROW;
   // A direct page load (e.g. refreshing /library) starts locked with no key in
   // memory — bounce to the gate so the user unlocks and their items load,
   // instead of rendering an empty vault.
@@ -70,8 +99,8 @@ export default function VaultTabs() {
 
   return (
     <Tabs
-      tabBar={(props) => <SideRail {...props} />}
-      sceneContainerStyle={{ paddingLeft: RAIL, backgroundColor: theme.bg }}
+      tabBar={(props) => <AppTabBar {...props} bottom={bottom} />}
+      sceneContainerStyle={bottom ? { paddingBottom: BAR, backgroundColor: theme.bg } : { paddingLeft: RAIL, backgroundColor: theme.bg }}
       screenOptions={{
         headerStyle: { backgroundColor: theme.bg },
         headerTintColor: theme.text,

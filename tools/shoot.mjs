@@ -48,6 +48,14 @@ try {
   await page.waitForTimeout(2000);
   await shot(page, "02-library-empty");
 
+  // the new unlock screen: dots + type-to-unlock (no pin keyboard, no labels)
+  await page.goto(BASE + "/unlock", { waitUntil: "load" });
+  await page.waitForTimeout(1500);
+  await shot(page, "02b-unlock");
+  await page.click('[data-testid="pin-type-area"]').catch(() => {});
+  await page.keyboard.type("1234");
+  await page.waitForTimeout(2000); // unlocks -> redirects back to the library
+
   // import: image + a real (tiny) video, via the file chooser
   page.on("filechooser", async (fc) => {
     await fc.setFiles([
@@ -91,38 +99,41 @@ try {
 
   await page.getByText("Save", { exact: true }).click();
   await page.waitForTimeout(2000);
-  await shot(page, "05-home-tiles"); // home: category tiles
+  await shot(page, "05-home-tiles"); // home: smaller category tiles + format tabs
 
-  // open the Videos category (focused fullscreen view)
-  await page.getByText("Videos", { exact: false }).first().click();
-  await page.waitForTimeout(1000);
+  // Videos tab — focused view with an "Add videos" button
+  await page.click('[data-testid="tab-video"]');
+  await page.waitForTimeout(900);
   await shot(page, "06-videos-section");
-  // back to home
-  await page.click('[data-testid="nav-back"]', { timeout: 8000 });
-  await page.waitForTimeout(700);
 
-  // open All -> open the image preview
-  await page.getByText("All", { exact: true }).first().click();
-  await page.waitForTimeout(800);
+  // All tab -> open the image preview
+  await page.click('[data-testid="tab-all"]');
+  await page.waitForTimeout(700);
   await page.getByText("photo.png", { exact: false }).first().click();
   await page.waitForTimeout(1500);
   await shot(page, "07-preview");
   await page.mouse.click(28, 58); // close the media preview overlay
+  await page.waitForTimeout(400);
 
-  // back to home, then make a note and view it via the Notes tile
-  await page.click('[data-testid="nav-back"]', { timeout: 8000 });
+  // Notes tab -> its "Add note" button opens the editor directly
+  await page.click('[data-testid="tab-note"]');
   await page.waitForTimeout(500);
   await page.click('[data-testid="fab-add"]');
-  await page.waitForTimeout(400);
-  await page.getByText("New note").click();
   await page.waitForTimeout(700);
   await page.getByPlaceholder("Title").fill("Shopping list");
   await page.getByPlaceholder(/Start writing/).fill("- [ ] milk\n- [x] eggs\nGet bread too");
   await page.getByText("Save", { exact: true }).click();
   await page.waitForTimeout(1200);
-  await page.getByText("Notes", { exact: false }).first().click();
+  await page.click('[data-testid="tab-note"]');
   await page.waitForTimeout(800);
   await shot(page, "08-notes-section");
+
+  // narrow viewport: the tab bar should move to the bottom (phone layout)
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.waitForTimeout(800);
+  await page.click('[data-testid="tab-home"]').catch(() => {});
+  await page.waitForTimeout(600);
+  await shot(page, "09-narrow-bottombar");
 } catch (e) {
   console.log("ERROR:", e.message);
   await shot(page, "99-error");

@@ -63,12 +63,26 @@ type Pending = {
   cat: FileCategory;
 };
 
+type Section = "home" | "all" | "folders" | FileCategory;
+// The horizontal format tabs under the search bar. Shown even when empty so a
+// format is always one tap away; the per-tab add button imports that format.
+const TABS: { key: Section; label: string }[] = [
+  { key: "home", label: "Home" },
+  { key: "all", label: "All" },
+  { key: "image", label: "Images" },
+  { key: "video", label: "Videos" },
+  { key: "audio", label: "Audio" },
+  { key: "document", label: "Docs" },
+  { key: "note", label: "Notes" },
+  { key: "folders", label: "Folders" },
+];
+
 export default function Library() {
   const { vault, unlocked, cloud } = useVault();
   const [items, setItems] = useState<VaultItem[]>([]);
   const [query, setQuery] = useState("");
   // "home" = the category tiles; "all"/"folders"/a category = a focused view.
-  const [section, setSection] = useState<"home" | "all" | "folders" | FileCategory>("home");
+  const [section, setSection] = useState<Section>("home");
   const [sort, setSort] = useState<Sort>("new");
   const [grid, setGrid] = useState(false);
 
@@ -191,6 +205,31 @@ export default function Library() {
     }
   }
 
+  // The add action + label for the current section, so each format's view has
+  // its own "Add videos" / "Add photos" / "Add files" button.
+  function addForSection() {
+    if (section === "image") return importPhotos("image");
+    if (section === "video") return importPhotos("video");
+    if (section === "note") return newNote();
+    if (section === "folders") return importFolder();
+    if (section === "home" || section === "all") return setImportMenu(true);
+    return importFiles(); // audio / document / apk / archive / other
+  }
+  const addLabel =
+    section === "image"
+      ? "Add photos"
+      : section === "video"
+        ? "Add videos"
+        : section === "note"
+          ? "Add note"
+          : section === "folders"
+            ? "Add folder"
+            : section === "audio"
+              ? "Add audio"
+              : section === "document"
+                ? "Add docs"
+                : "Add files";
+
   // ---- gallery review: step through previewable media in the current view ----
   const isPreviewable = (it: VaultItem) => {
     const c = categorize(it);
@@ -242,10 +281,15 @@ export default function Library() {
     return { key: `${name}_${Math.random().toString(36).slice(2)}`, name, bytes, mime, type, album, uri, cat };
   }
 
-  async function importPhotos() {
+  async function importPhotos(kind: "all" | "image" | "video" = "all") {
     setImportMenu(false);
     const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.All,
+      mediaTypes:
+        kind === "image"
+          ? ImagePicker.MediaTypeOptions.Images
+          : kind === "video"
+            ? ImagePicker.MediaTypeOptions.Videos
+            : ImagePicker.MediaTypeOptions.All,
       quality: 1,
       allowsMultipleSelection: true,
     });
@@ -679,6 +723,35 @@ export default function Library() {
 
       <Field value={query} onChangeText={setQuery} placeholder={section === "home" ? "Search everything…" : "Search…"} />
 
+      {/* format tabs — quick-switch between every kind of item */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={{ flexGrow: 0, flexShrink: 0, marginBottom: 4 }}
+        contentContainerStyle={{ gap: 8, paddingVertical: 8 }}
+      >
+        {TABS.map((t) => {
+          const active = section === t.key;
+          return (
+            <Pressable
+              key={t.key}
+              onPress={() => openSection(t.key)}
+              testID={`tab-${t.key}`}
+              style={{
+                paddingVertical: 7,
+                paddingHorizontal: 14,
+                borderRadius: 999,
+                backgroundColor: active ? theme.accent : theme.surface,
+                borderWidth: 1,
+                borderColor: active ? theme.accent : theme.border,
+              }}
+            >
+              <Text style={{ color: active ? theme.accentText : theme.muted, fontWeight: "700", fontSize: 13 }}>{t.label}</Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+
       {section === "home" && !query.trim() && items.length > 0 ? (
         // home: a grid of category tiles
         <ScrollView contentContainerStyle={{ paddingBottom: 90 }}>
@@ -868,31 +941,58 @@ export default function Library() {
         />
       )}
 
-      {/* compact floating add button */}
-      {!selectMode && (
-        <Pressable
-          onPress={() => setImportMenu(true)}
-          testID="fab-add"
-          style={{
-            position: "absolute",
-            right: 18,
-            bottom: 22,
-            width: 58,
-            height: 58,
-            borderRadius: 29,
-            backgroundColor: theme.accent,
-            alignItems: "center",
-            justifyContent: "center",
-            shadowColor: "#000",
-            shadowOpacity: 0.4,
-            shadowRadius: 8,
-            shadowOffset: { width: 0, height: 4 },
-            elevation: 8,
-          }}
-        >
-          <Ionicons name="add" size={32} color={theme.accentText} />
-        </Pressable>
-      )}
+      {/* floating add button — a labelled "Add videos / photos / files…" inside a
+          format section, a plain + on Home/All (which opens the full menu) */}
+      {!selectMode &&
+        (section === "home" || section === "all" ? (
+          <Pressable
+            onPress={() => setImportMenu(true)}
+            testID="fab-add"
+            style={{
+              position: "absolute",
+              right: 18,
+              bottom: 22,
+              width: 58,
+              height: 58,
+              borderRadius: 29,
+              backgroundColor: theme.accent,
+              alignItems: "center",
+              justifyContent: "center",
+              shadowColor: "#000",
+              shadowOpacity: 0.4,
+              shadowRadius: 8,
+              shadowOffset: { width: 0, height: 4 },
+              elevation: 8,
+            }}
+          >
+            <Ionicons name="add" size={32} color={theme.accentText} />
+          </Pressable>
+        ) : (
+          <Pressable
+            onPress={addForSection}
+            testID="fab-add"
+            style={{
+              position: "absolute",
+              right: 18,
+              bottom: 22,
+              height: 52,
+              paddingHorizontal: 18,
+              borderRadius: 26,
+              backgroundColor: theme.accent,
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 7,
+              shadowColor: "#000",
+              shadowOpacity: 0.4,
+              shadowRadius: 8,
+              shadowOffset: { width: 0, height: 4 },
+              elevation: 8,
+            }}
+          >
+            <Ionicons name="add" size={24} color={theme.accentText} />
+            <Text style={{ color: theme.accentText, fontWeight: "800", fontSize: 15 }}>{addLabel}</Text>
+          </Pressable>
+        ))}
 
       {/* multi-select action bar */}
       {selectMode && selectedIds.length > 0 && (
@@ -1246,22 +1346,22 @@ function CategoryTile({ label, icon, color, count, onPress }: { label: string; i
     <Pressable
       onPress={onPress}
       style={{
-        width: "31.5%",
+        width: "23%",
         aspectRatio: 1,
         borderRadius: theme.radius,
         backgroundColor: theme.surface,
         borderWidth: 1,
         borderColor: theme.border,
-        padding: 14,
+        padding: 10,
         justifyContent: "space-between",
       }}
     >
-      <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: color + "22", alignItems: "center", justifyContent: "center" }}>
-        <Ionicons name={icon} size={24} color={color} />
+      <View style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: color + "22", alignItems: "center", justifyContent: "center" }}>
+        <Ionicons name={icon} size={19} color={color} />
       </View>
       <View>
-        <Text numberOfLines={1} style={{ color: theme.text, fontWeight: "700", fontSize: 15 }}>{label}</Text>
-        <Text style={{ color: theme.muted, fontSize: 12 }}>{count} item{count === 1 ? "" : "s"}</Text>
+        <Text numberOfLines={1} style={{ color: theme.text, fontWeight: "700", fontSize: 13 }}>{label}</Text>
+        <Text style={{ color: theme.muted, fontSize: 11 }}>{count} item{count === 1 ? "" : "s"}</Text>
       </View>
     </Pressable>
   );

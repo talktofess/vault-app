@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Alert, View } from "react-native";
 import { router } from "expo-router";
 import { useVault } from "../src/state/VaultContext";
-import { Muted, Screen, Title } from "../src/ui/components";
-import { PIN_LENGTH, PinPad } from "../src/ui/PinPad";
+import { Screen } from "../src/ui/components";
+import { PIN_LENGTH, PinDots } from "../src/ui/PinPad";
 import { promptBiometric } from "../src/platform/expoKeychain";
 
 export default function Unlock() {
@@ -75,10 +75,8 @@ export default function Unlock() {
 
   return (
     <Screen>
-      <Title>Enter your PIN</Title>
-      <Muted>Enter your 4-digit PIN to unlock your vault.</Muted>
-      <View style={{ flex: 1, justifyContent: "center" }}>
-        <PinPad
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+        <PinDots
           pin={pin}
           onChange={setPin}
           disabled={busy}

@@ -1,9 +1,56 @@
-import React, { useEffect, useState } from "react";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { theme } from "./theme";
 
 export const PIN_LENGTH = 4;
+
+// A quiet "type your code" entry: just the dots + an invisible field that
+// captures typed digits (a real keyboard on web/desktop, the OS number pad on a
+// phone). No on-screen calculator grid — used for the unlock screen.
+export function PinDots({
+  pin,
+  onChange,
+  disabled,
+  onBiometric,
+}: {
+  pin: string;
+  onChange: (next: string) => void;
+  disabled?: boolean;
+  onBiometric?: () => void;
+}) {
+  const input = useRef<TextInput>(null);
+  const focus = () => input.current?.focus();
+  return (
+    <Pressable onPress={focus} testID="pin-type-area" style={{ alignItems: "center", gap: 22 }}>
+      <View style={styles.dots}>
+        {Array.from({ length: PIN_LENGTH }).map((_, i) => (
+          <View key={i} style={[styles.dotLg, i < pin.length && styles.dotFilled]} />
+        ))}
+      </View>
+      <TextInput
+        ref={input}
+        testID="pin-type-input"
+        value={pin}
+        onChangeText={(t) => !disabled && onChange(t.replace(/\D/g, "").slice(0, PIN_LENGTH))}
+        keyboardType="number-pad"
+        secureTextEntry
+        autoFocus
+        editable={!disabled}
+        maxLength={PIN_LENGTH}
+        // visually hidden, but still focusable + typeable on every platform
+        style={{ position: "absolute", opacity: 0, width: 1, height: 1 }}
+      />
+      <Text style={{ color: theme.muted, fontSize: 13 }}>type your code</Text>
+      {onBiometric && (
+        <Pressable onPress={onBiometric} hitSlop={10} style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 6 }}>
+          <Ionicons name="finger-print" size={20} color={theme.accent} />
+          <Text style={{ color: theme.accent, fontSize: 14, fontWeight: "600" }}>Use biometrics</Text>
+        </Pressable>
+      )}
+    </Pressable>
+  );
+}
 
 // A self-contained numeric keypad. We deliberately do NOT use a system TextInput
 // here: the OS keyboard (autofill, predictive text, smart punctuation, trailing
@@ -148,6 +195,7 @@ const styles = StyleSheet.create({
     borderColor: theme.muted,
   },
   dotFilled: { backgroundColor: theme.accent, borderColor: theme.accent },
+  dotLg: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: theme.muted },
   grid: {
     flexDirection: "row",
     flexWrap: "wrap",
