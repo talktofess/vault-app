@@ -9,6 +9,7 @@ import { useVault } from "../../src/state/VaultContext";
 import { Button, Field, Muted, Title } from "../../src/ui/components";
 import { theme } from "../../src/ui/theme";
 import { ensureSignedIn } from "../../src/cloud/account";
+import { SUPABASE_URL } from "../../src/cloud/supabase";
 
 const MIN_WORDS = 10;
 
@@ -84,6 +85,13 @@ export default function Cloud() {
 
   function handleConnectError(e: unknown) {
     const msg = e instanceof Error ? e.message : "Something went wrong.";
+    if (/failed to fetch|network ?request ?failed|load failed|networkerror/i.test(msg)) {
+      Alert.alert(
+        "Can't reach the cloud",
+        `Couldn't connect to ${SUPABASE_URL}.\n\n• Check your internet connection.\n• If you set EXPO_PUBLIC_SUPABASE_URL on Vercel, it must be the API URL (https://<ref>.supabase.co) — NOT the dashboard link.\n\nThen hard-refresh and try again.`
+      );
+      return;
+    }
     if (/confirm/i.test(msg)) {
       Alert.alert(
         "Turn off email confirmation",
@@ -130,6 +138,9 @@ export default function Cloud() {
           </Muted>
           <Field value={safeWords} onChangeText={setSafeWords} placeholder="Your safe words" secureTextEntry />
           <Button label={busy ?? "Connect & sync"} onPress={connect} loading={!!busy} />
+          <Text style={{ color: theme.muted, fontSize: 11 }} selectable>
+            Server: {SUPABASE_URL}
+          </Text>
         </Section>
       ) : (
         <Section icon="cloud-done-outline" title="Connected">

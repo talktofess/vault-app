@@ -173,9 +173,26 @@ const DEFAULT_SUPABASE_URL = "https://aiheqgxdwqkpqoyifasu.supabase.co";
 const DEFAULT_SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFpaGVxZ3hkd3FrcHFveWlmYXN1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAzMjE4MTcsImV4cCI6MjA5NTg5NzgxN30.AZr5i0u_uFCK0Phh6dsTV1L0bptQA4ANiFsL2orwKDo";
 
+// Resolve the API endpoint robustly. A common mistake is pasting the Supabase
+// *dashboard* link (https://supabase.com/dashboard/project/<ref>) as the URL —
+// the browser then can't reach the API and every request dies with "Failed to
+// fetch". So: pull the project ref out of a dashboard link, require a real
+// *.supabase.co host, and otherwise fall back to the baked-in default.
+function resolveUrl(): string {
+  const raw = (process.env.EXPO_PUBLIC_SUPABASE_URL || "").trim();
+  if (!raw) return DEFAULT_SUPABASE_URL;
+  const dash = raw.match(/dashboard\/project\/([a-z0-9]+)/i);
+  if (dash) return `https://${dash[1]}.supabase.co`;
+  const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  return /\.supabase\.(co|in)(\/|$)/i.test(withScheme) ? withScheme.replace(/\/+$/, "") : DEFAULT_SUPABASE_URL;
+}
+
+export const SUPABASE_URL = resolveUrl();
+export const SUPABASE_ANON_KEY = (process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY).trim();
+
 export function createSupabase(): Supabase | null {
-  const url = process.env.EXPO_PUBLIC_SUPABASE_URL || DEFAULT_SUPABASE_URL;
-  const key = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
+  const url = SUPABASE_URL;
+  const key = SUPABASE_ANON_KEY;
   if (!url || !key) return null;
   const client = createClient(url, key, {
     auth: {
