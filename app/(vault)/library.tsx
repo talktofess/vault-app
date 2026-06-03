@@ -14,6 +14,7 @@ import {
   Switch,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
@@ -67,17 +68,17 @@ type Pending = {
 };
 
 type Section = "home" | "all" | "folders" | FileCategory;
-// The horizontal format tabs under the search bar. Shown even when empty so a
-// format is always one tap away; the per-tab add button imports that format.
-const TABS: { key: Section; label: string }[] = [
-  { key: "home", label: "Home" },
-  { key: "all", label: "All" },
-  { key: "image", label: "Images" },
-  { key: "video", label: "Videos" },
-  { key: "audio", label: "Audio" },
-  { key: "document", label: "Docs" },
-  { key: "note", label: "Notes" },
-  { key: "folders", label: "Folders" },
+// The horizontal format tabs under the search bar — icon-only for a minimal
+// look. Shown even when empty so a format is always one tap away.
+const TABS: { key: Section; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { key: "home", label: "Home", icon: "home-outline" },
+  { key: "all", label: "All", icon: "albums-outline" },
+  { key: "image", label: "Images", icon: "image-outline" },
+  { key: "video", label: "Videos", icon: "videocam-outline" },
+  { key: "audio", label: "Audio", icon: "musical-notes-outline" },
+  { key: "document", label: "Docs", icon: "document-text-outline" },
+  { key: "note", label: "Notes", icon: "create-outline" },
+  { key: "folders", label: "Folders", icon: "folder-outline" },
 ];
 
 export default function Library() {
@@ -88,7 +89,12 @@ export default function Library() {
   // "home" = the category tiles; "all"/"folders"/a category = a focused view.
   const [section, setSection] = useState<Section>("home");
   const [sort, setSort] = useState<Sort>("new");
-  const [grid, setGrid] = useState(false);
+  const [grid, setGrid] = useState(true); // everything is tiles by default
+  const { width: winW } = useWindowDimensions();
+  // Really tiny, fixed-size tiles; pack as many as fit (minus the side rail on
+  // wide screens). Fixed width keeps them tiny even when a row isn't full.
+  const TILE = winW >= 720 ? 88 : 80;
+  const cols = Math.max(3, Math.floor((winW - (winW >= 720 ? 96 : 24)) / (TILE + 6)));
 
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -205,7 +211,6 @@ export default function Library() {
   function openSection(s: typeof section) {
     setCurrentAlbum(null);
     setQuery("");
-    setGrid(s === "image" || s === "video" || s === "all"); // visual types open as a grid
     setSection(s);
   }
   function goBack() {
@@ -803,14 +808,14 @@ export default function Library() {
               <Ionicons name={grid ? "list-outline" : "grid-outline"} size={20} color={theme.accent} />
             </Pressable>
           )}
-          {section !== "home" && (
-            <Pressable onPress={() => setSort(sort === "new" ? "name" : sort === "name" ? "size" : "new")}>
-              <Text style={{ color: theme.accent, fontWeight: "600" }}>{sort === "new" ? "Newest" : sort === "name" ? "A–Z" : "Largest"}</Text>
+          {section !== "home" && !selectMode && (
+            <Pressable onPress={() => setSort(sort === "new" ? "name" : sort === "name" ? "size" : "new")} hitSlop={8}>
+              <Ionicons name={sort === "new" ? "time-outline" : sort === "name" ? "text-outline" : "swap-vertical-outline"} size={20} color={theme.accent} />
             </Pressable>
           )}
           {section !== "home" && (
-            <Pressable onPress={() => (selectMode ? clearSelect() : setSelectMode(true))}>
-              <Text style={{ color: theme.accent, fontWeight: "600" }}>{selectMode ? "Done" : "Select"}</Text>
+            <Pressable onPress={() => (selectMode ? clearSelect() : setSelectMode(true))} hitSlop={8}>
+              <Ionicons name={selectMode ? "close-outline" : "checkmark-circle-outline"} size={22} color={theme.accent} />
             </Pressable>
           )}
         </View>
@@ -818,7 +823,7 @@ export default function Library() {
 
       <Field value={query} onChangeText={setQuery} placeholder={section === "home" ? "Search everything…" : "Search…"} />
 
-      {/* format tabs — quick-switch between every kind of item */}
+      {/* format tabs — icon-only quick-switch between every kind of item */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -832,63 +837,46 @@ export default function Library() {
               key={t.key}
               onPress={() => openSection(t.key)}
               testID={`tab-${t.key}`}
+              accessibilityLabel={t.label}
               style={{
-                paddingVertical: 7,
-                paddingHorizontal: 14,
-                borderRadius: 999,
+                width: 40,
+                height: 40,
+                borderRadius: 20,
+                alignItems: "center",
+                justifyContent: "center",
                 backgroundColor: active ? theme.accent : theme.surface,
                 borderWidth: 1,
                 borderColor: active ? theme.accent : theme.border,
               }}
             >
-              <Text style={{ color: active ? theme.accentText : theme.muted, fontWeight: "700", fontSize: 13 }}>{t.label}</Text>
+              <Ionicons name={t.icon} size={20} color={active ? theme.accentText : theme.muted} />
             </Pressable>
           );
         })}
       </ScrollView>
 
-      {section === "home" && !query.trim() && items.length > 0 ? (
-        // home: a grid of category tiles
-        <ScrollView contentContainerStyle={{ paddingBottom: 90 }}>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
-            <CategoryTile label="All" icon="albums-outline" color={theme.accent} count={items.length} onPress={() => openSection("all")} />
-            {albums.length > 0 && (
-              <CategoryTile label="Folders" icon="folder-outline" color="#c79a63" count={albums.length} onPress={() => openSection("folders")} />
-            )}
-            {homeCats.map((c) => (
-              <CategoryTile
-                key={c}
-                label={FILTERS.find((f) => f.key === c)?.label ?? c}
-                icon={CATEGORY_ICON[c]}
-                color={CATEGORY_COLOR[c]}
-                count={counts[c] ?? 0}
-                onPress={() => openSection(c)}
-              />
-            ))}
-          </View>
-        </ScrollView>
-      ) : section === "folders" && currentAlbum === null ? (
+      {section === "folders" && currentAlbum === null ? (
         // folders: a grid of album tiles, led by a "New folder" tile
         <ScrollView contentContainerStyle={{ paddingBottom: 90 }}>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
             <Pressable
               onPress={() => setNewFolderOpen(true)}
               testID="new-folder-tile"
               style={{
-                width: "23%",
+                width: 104,
                 aspectRatio: 1,
-                borderRadius: theme.radius,
+                borderRadius: theme.radiusSm,
                 backgroundColor: theme.surface,
                 borderWidth: 1.5,
                 borderColor: theme.accent,
                 borderStyle: "dashed",
                 alignItems: "center",
                 justifyContent: "center",
-                gap: 6,
+                gap: 4,
               }}
             >
-              <Ionicons name="add-circle-outline" size={26} color={theme.accent} />
-              <Text style={{ color: theme.accent, fontWeight: "700", fontSize: 12 }}>New folder</Text>
+              <Ionicons name="add-circle-outline" size={24} color={theme.accent} />
+              <Text style={{ color: theme.accent, fontWeight: "700", fontSize: 11 }}>New folder</Text>
             </Pressable>
             {albums.map((a) => (
               <CategoryTile key={a.name} label={a.name} icon="folder" color="#c79a63" count={a.n} onPress={() => setCurrentAlbum(a.name)} />
@@ -929,10 +917,10 @@ export default function Library() {
         <FlatList
           data={visible}
           keyExtractor={(i) => i.id}
-          key={grid ? "grid" : "list"}
-          numColumns={grid ? 3 : 1}
-          columnWrapperStyle={grid ? { gap: 8 } : undefined}
-          contentContainerStyle={{ gap: 8, paddingBottom: selectMode ? 90 : 80 }}
+          key={grid ? `grid-${cols}` : "list"}
+          numColumns={grid ? cols : 1}
+          columnWrapperStyle={grid ? { gap: 6 } : undefined}
+          contentContainerStyle={{ gap: 6, paddingBottom: selectMode ? 90 : 80 }}
           removeClippedSubviews
           renderItem={({ item }) => {
             const cat = categorize(item);
@@ -942,11 +930,12 @@ export default function Library() {
                 <Pressable
                   onPress={() => (selectMode ? toggleSelect(item.id) : open(item))}
                   onLongPress={() => !selectMode && startSelect(item.id)}
+                  testID={`tile-${cat}`}
                   style={{
-                    flex: 1 / 3,
+                    width: TILE,
                     aspectRatio: 1,
                     backgroundColor: theme.surface,
-                    borderRadius: theme.radius,
+                    borderRadius: theme.radiusSm,
                     borderWidth: 1,
                     borderColor: isSel ? theme.accent : theme.border,
                     overflow: "hidden",
@@ -959,17 +948,14 @@ export default function Library() {
                   ) : cat === "video" && vault.isCached(item.id) && posterSupported ? (
                     <VideoThumb item={item} getBytes={readBytes} getThumb={(id) => vault.readThumb(id)} fill />
                   ) : (
-                    <Ionicons name={CATEGORY_ICON[cat]} size={36} color={CATEGORY_COLOR[cat]} />
+                    <Ionicons name={CATEGORY_ICON[cat]} size={28} color={CATEGORY_COLOR[cat]} />
                   )}
-                  <View style={{ position: "absolute", left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.55)", paddingHorizontal: 6, paddingVertical: 4 }}>
-                    <Text numberOfLines={1} style={{ color: "#fff", fontSize: 10 }}>{item.name}</Text>
-                  </View>
                   {item.remote && (
                     <Ionicons
                       name={item.cached === false ? "cloud-outline" : "cloud-done-outline"}
-                      size={14}
+                      size={13}
                       color={item.cached === false ? "#fff" : theme.good}
-                      style={{ position: "absolute", top: 6, right: 6 }}
+                      style={{ position: "absolute", top: 4, right: 4 }}
                     />
                   )}
                   {selectMode && (
@@ -1060,58 +1046,33 @@ export default function Library() {
         />
       )}
 
-      {/* floating add button — a labelled "Add videos / photos / files…" inside a
-          format section, a plain + on Home/All (which opens the full menu) */}
-      {!selectMode &&
-        (section === "home" || section === "all" ? (
-          <Pressable
-            onPress={() => setImportMenu(true)}
-            testID="fab-add"
-            style={{
-              position: "absolute",
-              right: 18,
-              bottom: 22,
-              width: 58,
-              height: 58,
-              borderRadius: 29,
-              backgroundColor: theme.accent,
-              alignItems: "center",
-              justifyContent: "center",
-              shadowColor: "#000",
-              shadowOpacity: 0.4,
-              shadowRadius: 8,
-              shadowOffset: { width: 0, height: 4 },
-              elevation: 8,
-            }}
-          >
-            <Ionicons name="add" size={32} color={theme.accentText} />
-          </Pressable>
-        ) : (
-          <Pressable
-            onPress={addForSection}
-            testID="fab-add"
-            style={{
-              position: "absolute",
-              right: 18,
-              bottom: 22,
-              height: 52,
-              paddingHorizontal: 18,
-              borderRadius: 26,
-              backgroundColor: theme.accent,
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 7,
-              shadowColor: "#000",
-              shadowOpacity: 0.4,
-              shadowRadius: 8,
-              shadowOffset: { width: 0, height: 4 },
-              elevation: 8,
-            }}
-          >
-            <Ionicons name="add" size={24} color={theme.accentText} />
-            <Text style={{ color: theme.accentText, fontWeight: "800", fontSize: 15 }}>{addLabel}</Text>
-          </Pressable>
-        ))}
+      {/* minimal floating add button — context comes from the active tab
+          (adds that format; opens the menu on Home/All; new/into folder) */}
+      {!selectMode && (
+        <Pressable
+          onPress={addForSection}
+          testID="fab-add"
+          accessibilityLabel={addLabel}
+          style={{
+            position: "absolute",
+            right: 18,
+            bottom: 22,
+            width: 56,
+            height: 56,
+            borderRadius: 28,
+            backgroundColor: theme.accent,
+            alignItems: "center",
+            justifyContent: "center",
+            shadowColor: "#000",
+            shadowOpacity: 0.4,
+            shadowRadius: 8,
+            shadowOffset: { width: 0, height: 4 },
+            elevation: 8,
+          }}
+        >
+          <Ionicons name={section === "folders" && currentAlbum === null ? "create-outline" : "add"} size={30} color={theme.accentText} />
+        </Pressable>
+      )}
 
       {/* multi-select action bar */}
       {selectMode && selectedIds.length > 0 && (
@@ -1597,22 +1558,20 @@ function CategoryTile({ label, icon, color, count, onPress }: { label: string; i
     <Pressable
       onPress={onPress}
       style={{
-        width: "23%",
+        width: 104,
         aspectRatio: 1,
-        borderRadius: theme.radius,
+        borderRadius: theme.radiusSm,
         backgroundColor: theme.surface,
         borderWidth: 1,
         borderColor: theme.border,
-        padding: 10,
+        padding: 9,
         justifyContent: "space-between",
       }}
     >
-      <View style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: color + "22", alignItems: "center", justifyContent: "center" }}>
-        <Ionicons name={icon} size={19} color={color} />
-      </View>
+      <Ionicons name={icon} size={22} color={color} />
       <View>
-        <Text numberOfLines={1} style={{ color: theme.text, fontWeight: "700", fontSize: 13 }}>{label}</Text>
-        <Text style={{ color: theme.muted, fontSize: 11 }}>{count} item{count === 1 ? "" : "s"}</Text>
+        <Text numberOfLines={1} style={{ color: theme.text, fontWeight: "700", fontSize: 12 }}>{label}</Text>
+        <Text style={{ color: theme.muted, fontSize: 10 }}>{count}</Text>
       </View>
     </Pressable>
   );

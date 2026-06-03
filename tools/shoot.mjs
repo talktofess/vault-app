@@ -123,7 +123,7 @@ try {
   await page.click('[data-testid="tab-all"]');
   await page.waitForTimeout(900); // let video posters generate
   await shot(page, "06b-all-grid"); // video should now show a poster, not a blank icon
-  await page.getByText(/\.mp4/).first().click();
+  await page.locator('[data-testid="tile-video"]').first().click();
   await page.waitForTimeout(1500);
   // pause + seek so the (very short) test clip is captured mid-frame, filling
   await page.evaluate(() => {
