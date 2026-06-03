@@ -26,6 +26,7 @@ import { Markdown } from "../../src/ui/Markdown";
 import { VideoPlayer } from "../../src/ui/VideoPlayer";
 import { TrimModal } from "../../src/ui/TrimModal";
 import { trimSupported } from "../../src/platform/trim";
+import { makeVideoPoster, posterSupported } from "../../src/platform/poster";
 import { theme } from "../../src/ui/theme";
 import { makeViewableUri, releaseViewableUri, saveBytes } from "../../src/platform/io";
 import { compressImage, readFileBytes, deleteFromGallery, probeMime } from "../../src/platform/media";
@@ -59,7 +60,8 @@ type Pending = {
   mime?: string;
   type: ItemType;
   album?: string;
-  uri?: string; // image preview (object URL) — released on save/discard
+  uri?: string; // image preview / playable video (object URL) — released on save/discard
+  poster?: string; // video poster-frame (object URL) for the review thumbnail
   cat: FileCategory;
 };
 
@@ -95,6 +97,7 @@ export default function Library() {
   const syncingRef = useRef(false); // guards against overlapping syncs
 
   const [preview, setPreview] = useState<Preview | null>(null);
+  const [playlistOpen, setPlaylistOpen] = useState(false); // "up next" drawer in the viewer
   const [textView, setTextView] = useState<TextView | null>(null);
   const [noteEdit, setNoteEdit] = useState<NoteEdit | null>(null);
   const [noteBodies, setNoteBodies] = useState<Record<string, string>>({}); // id -> lowercased body, for content search
@@ -245,6 +248,13 @@ export default function Library() {
     setPreview(null);
     await open(next);
   }
+  // Jump straight to a specific item from the "up next" playlist in the viewer.
+  async function goToItem(item: VaultItem) {
+    if (!preview || preview.item.id === item.id) return;
+    await preview.release();
+    setPreview(null);
+    await open(item);
+  }
 
   // ---- rename (edit) ----
   async function doRename(item: VaultItem, name: string) {
@@ -269,6 +279,7 @@ export default function Library() {
     const probe = { id: "", type, name, mime, size: bytes.length, createdAt: 0 } as VaultItem;
     const cat = categorize(probe);
     let uri: string | undefined;
+    let poster: string | undefined;
     // Images get a thumbnail; videos get a playable URL so the trimmer can scrub
     // them before saving. (Both are object URLs on web, released on save/discard.)
     if (cat === "image" || cat === "video") {
@@ -278,7 +289,16 @@ export default function Library() {
         /* no preview */
       }
     }
-    return { key: `${name}_${Math.random().toString(36).slice(2)}`, name, bytes, mime, type, album, uri, cat };
+    // Grab a poster frame so the review shows what the video is, not a blank box.
+    if (cat === "video" && uri && posterSupported) {
+      try {
+        const pb = await makeVideoPoster(uri);
+        if (pb) poster = await makeViewableUri(`pos_${Math.random().toString(36).slice(2)}`, pb, "jpg");
+      } catch {
+        /* fall back to the icon */
+      }
+    }
+    return { key: `${name}_${Math.random().toString(36).slice(2)}`, name, bytes, mime, type, album, uri, poster, cat };
   }
 
   async function importPhotos(kind: "all" | "image" | "video" = "all") {
@@ -400,11 +420,15 @@ export default function Library() {
     setReview((r) => {
       const it = r?.find((p) => p.key === key);
       if (it?.uri) void releaseViewableUri(it.uri);
+      if (it?.poster) void releaseViewableUri(it.poster);
       return r ? r.filter((p) => p.key !== key) : r;
     });
   }
   function discardReview() {
-    review?.forEach((p) => p.uri && void releaseViewableUri(p.uri));
+    review?.forEach((p) => {
+      if (p.uri) void releaseViewableUri(p.uri);
+      if (p.poster) void releaseViewableUri(p.poster);
+    });
     pendingAssetIds.current = [];
     setReview(null);
   }
@@ -413,16 +437,22 @@ export default function Library() {
   async function applyTrim(key: string, out: Uint8Array) {
     const old = review?.find((p) => p.key === key);
     let uri: string | undefined;
+    let poster: string | undefined;
     if (old) {
       try {
         const probe = { id: "", type: old.type, name: old.name, mime: old.mime, size: out.length, createdAt: 0 } as VaultItem;
         uri = await makeViewableUri(`rev_${Math.random().toString(36).slice(2)}`, out, viewExt(probe));
+        if (uri && posterSupported) {
+          const pb = await makeVideoPoster(uri);
+          if (pb) poster = await makeViewableUri(`pos_${Math.random().toString(36).slice(2)}`, pb, "jpg");
+        }
       } catch {
         /* keep playable-less */
       }
       if (old.uri) void releaseViewableUri(old.uri);
+      if (old.poster) void releaseViewableUri(old.poster);
     }
-    setReview((r) => (r ? r.map((p) => (p.key === key ? { ...p, bytes: out, uri } : p)) : r));
+    setReview((r) => (r ? r.map((p) => (p.key === key ? { ...p, bytes: out, uri, poster } : p)) : r));
     setTrimming(null);
   }
   async function commitReview() {
@@ -432,7 +462,10 @@ export default function Library() {
       for (const p of review) {
         await vault.addItem(p.type, p.name.trim() || "Untitled", p.bytes, { mime: p.mime, album: p.album });
       }
-      review.forEach((p) => p.uri && void releaseViewableUri(p.uri));
+      review.forEach((p) => {
+        if (p.uri) void releaseViewableUri(p.uri);
+        if (p.poster) void releaseViewableUri(p.poster);
+      });
       setReview(null);
       refresh();
       void runSync(true);
@@ -566,6 +599,7 @@ export default function Library() {
   async function closePreview() {
     if (preview) await preview.release();
     setPreview(null);
+    setPlaylistOpen(false);
   }
 
   async function exportItem(item: VaultItem) {
@@ -841,6 +875,8 @@ export default function Library() {
                 >
                   {cat === "image" && vault.isCached(item.id) ? (
                     <Thumb item={item} getBytes={readBytes} fill />
+                  ) : cat === "video" && vault.isCached(item.id) && posterSupported ? (
+                    <VideoThumb item={item} getBytes={readBytes} fill />
                   ) : (
                     <Ionicons name={CATEGORY_ICON[cat]} size={36} color={CATEGORY_COLOR[cat]} />
                   )}
@@ -886,6 +922,8 @@ export default function Library() {
               >
                 {cat === "image" && vault.isCached(item.id) ? (
                   <Thumb item={item} getBytes={readBytes} />
+                ) : cat === "video" && vault.isCached(item.id) && posterSupported ? (
+                  <VideoThumb item={item} getBytes={readBytes} />
                 ) : (
                   <View
                     style={{
@@ -1063,8 +1101,15 @@ export default function Library() {
               contentContainerStyle={{ gap: 8, paddingBottom: 30 }}
               renderItem={({ item: p }) => (
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: theme.surface, borderRadius: theme.radius, borderWidth: 1, borderColor: theme.border, padding: 10 }}>
-                  {p.cat === "image" && p.uri ? (
-                    <Image source={{ uri: p.uri }} style={{ width: 48, height: 48, borderRadius: 10 }} resizeMode="cover" />
+                  {(p.cat === "image" && p.uri) || (p.cat === "video" && p.poster) ? (
+                    <View style={{ width: 48, height: 48, borderRadius: 10, overflow: "hidden" }}>
+                      <Image source={{ uri: p.cat === "video" ? p.poster : p.uri }} style={{ width: 48, height: 48 }} resizeMode="cover" />
+                      {p.cat === "video" && (
+                        <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" }}>
+                          <Ionicons name="play-circle" size={22} color="rgba(255,255,255,0.92)" />
+                        </View>
+                      )}
+                    </View>
                   ) : (
                     <View style={{ width: 48, height: 48, borderRadius: 10, backgroundColor: CATEGORY_COLOR[p.cat] + "22", alignItems: "center", justifyContent: "center" }}>
                       <Ionicons name={CATEGORY_ICON[p.cat]} size={24} color={CATEGORY_COLOR[p.cat]} />
@@ -1132,6 +1177,11 @@ export default function Library() {
                       {media.length > 1 ? `  ·  ${idx + 1} / ${media.length}` : ""}
                     </Text>
                   </View>
+                  {media.length > 1 && (
+                    <Pressable testID="playlist-toggle" onPress={() => setPlaylistOpen((o) => !o)} hitSlop={8}>
+                      <Ionicons name={playlistOpen ? "list" : "list-outline"} size={24} color={playlistOpen ? theme.accent2 : "#fff"} />
+                    </Pressable>
+                  )}
                   <Pressable onPress={() => exportItem(preview.item)} hitSlop={8}>
                     <Ionicons name="share-outline" size={24} color="#fff" />
                   </Pressable>
@@ -1153,6 +1203,47 @@ export default function Library() {
                     </>
                   )}
                 </View>
+
+                {/* collapsible "up next" playlist — jump straight to any item */}
+                {playlistOpen && media.length > 1 && (
+                  <View style={{ position: "absolute", top: 0, right: 0, bottom: 0, width: 288, maxWidth: "85%", backgroundColor: "rgba(0,0,0,0.94)", borderLeftWidth: 1, borderLeftColor: "rgba(255,255,255,0.12)", paddingTop: 40 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingBottom: 8 }}>
+                      <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>Up next · {media.length}</Text>
+                      <Pressable onPress={() => setPlaylistOpen(false)} hitSlop={8}>
+                        <Ionicons name="chevron-forward" size={22} color="#fff" />
+                      </Pressable>
+                    </View>
+                    <FlatList
+                      data={media}
+                      keyExtractor={(m) => m.id}
+                      contentContainerStyle={{ paddingBottom: 30 }}
+                      renderItem={({ item: m }) => {
+                        const active = m.id === preview.item.id;
+                        const mcat = categorize(m);
+                        return (
+                          <Pressable
+                            onPress={() => goToItem(m)}
+                            style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8, paddingHorizontal: 14, backgroundColor: active ? "rgba(255,255,255,0.13)" : "transparent" }}
+                          >
+                            <View style={{ width: 58, height: 40, borderRadius: 8, overflow: "hidden", backgroundColor: "rgba(255,255,255,0.08)", alignItems: "center", justifyContent: "center" }}>
+                              {mcat === "image" && vault.isCached(m.id) ? (
+                                <Thumb item={m} getBytes={readBytes} fill />
+                              ) : mcat === "video" && vault.isCached(m.id) && posterSupported ? (
+                                <VideoThumb item={m} getBytes={readBytes} fill />
+                              ) : (
+                                <Ionicons name={CATEGORY_ICON[mcat]} size={18} color={CATEGORY_COLOR[mcat]} />
+                              )}
+                            </View>
+                            <Text numberOfLines={2} style={{ flex: 1, color: active ? "#fff" : "rgba(255,255,255,0.78)", fontSize: 12, fontWeight: active ? "700" : "500" }}>
+                              {m.name}
+                            </Text>
+                            {active && <Ionicons name="play" size={14} color={theme.accent2} />}
+                          </Pressable>
+                        );
+                      }}
+                    />
+                  </View>
+                )}
               </View>
             );
           })()}
@@ -1339,6 +1430,59 @@ function Thumb({ item, getBytes, fill }: { item: VaultItem; getBytes: (i: VaultI
     );
   }
   return <Image source={{ uri }} style={box} resizeMode="cover" />;
+}
+
+// Session cache of generated video posters (item id -> object URL) so the grid
+// doesn't re-decode a clip on every render. Released when the page unloads.
+const videoPosters = new Map<string, string>();
+
+// A video tile that shows a real poster frame (web) with a play badge; falls
+// back to the camera icon while it generates or on native.
+function VideoThumb({ item, getBytes, fill }: { item: VaultItem; getBytes: (i: VaultItem) => Promise<Uint8Array>; fill?: boolean }) {
+  const [uri, setUri] = useState<string | null>(videoPosters.get(item.id) ?? null);
+  useEffect(() => {
+    if (videoPosters.has(item.id)) {
+      setUri(videoPosters.get(item.id)!);
+      return;
+    }
+    let active = true;
+    (async () => {
+      let vUri: string | null = null;
+      try {
+        const data = await getBytes(item);
+        vUri = await makeViewableUri(item.id + "_pv", data, viewExt(item));
+        const pb = await makeVideoPoster(vUri);
+        if (pb) {
+          const purl = await makeViewableUri(item.id + "_pos", pb, "jpg");
+          videoPosters.set(item.id, purl);
+          if (active) setUri(purl);
+        }
+      } catch {
+        /* icon fallback */
+      } finally {
+        if (vUri) releaseViewableUri(vUri); // the full video blob isn't needed past the frame grab
+      }
+    })();
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item.id]);
+
+  const box = fill ? { width: "100%" as const, height: "100%" as const } : { width: 46, height: 46, borderRadius: 12 };
+  if (!uri) {
+    return (
+      <View style={{ ...box, backgroundColor: CATEGORY_COLOR.video + "22", alignItems: "center", justifyContent: "center" }}>
+        <Ionicons name="videocam" size={fill ? 34 : 24} color={CATEGORY_COLOR.video} />
+      </View>
+    );
+  }
+  return (
+    <View style={{ ...box, overflow: "hidden", alignItems: "center", justifyContent: "center" }}>
+      <Image source={{ uri }} style={{ position: "absolute", width: "100%", height: "100%" }} resizeMode="cover" />
+      <Ionicons name="play-circle" size={fill ? 32 : 20} color="rgba(255,255,255,0.92)" />
+    </View>
+  );
 }
 
 function CategoryTile({ label, icon, color, count, onPress }: { label: string; icon: keyof typeof Ionicons.glyphMap; color: string; count: number; onPress: () => void }) {

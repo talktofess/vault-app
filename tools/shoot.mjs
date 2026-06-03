@@ -106,12 +106,26 @@ try {
   await page.waitForTimeout(900);
   await shot(page, "06-videos-section");
 
-  // All tab -> open the image preview
+  // All tab -> open the VIDEO to test the player + the "up next" playlist
   await page.click('[data-testid="tab-all"]');
-  await page.waitForTimeout(700);
-  await page.getByText("photo.png", { exact: false }).first().click();
+  await page.waitForTimeout(900); // let video posters generate
+  await shot(page, "06b-all-grid"); // video should now show a poster, not a blank icon
+  await page.getByText(/\.mp4/).first().click();
   await page.waitForTimeout(1500);
-  await shot(page, "07-preview");
+  // pause + seek so the (very short) test clip is captured mid-frame, filling
+  await page.evaluate(() => {
+    const v = document.querySelector("video");
+    if (v) {
+      v.pause();
+      v.currentTime = 0.5;
+    }
+  });
+  await page.waitForTimeout(500);
+  await shot(page, "07-preview"); // video should fill the viewer now
+  // open the collapsible "up next" playlist
+  await page.click('[data-testid="playlist-toggle"]').catch(() => {});
+  await page.waitForTimeout(1000);
+  await shot(page, "07b-playlist");
   await page.mouse.click(28, 58); // close the media preview overlay
   await page.waitForTimeout(400);
 
