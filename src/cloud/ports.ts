@@ -19,6 +19,8 @@ export interface CloudStore {
   // --- item metadata (public.items) ---
   /** Rows with updatedAt strictly after the cursor (null = all), oldest first. */
   listItemsSince(cursorISO: string | null): Promise<RemoteItem[]>;
+  /** How many (non-deleted) item rows exist for the signed-in account. */
+  countItems(): Promise<number>;
   upsertItem(row: RemoteItem): Promise<void>;
   markDeleted(id: string, deletedAtISO: string): Promise<void>;
 

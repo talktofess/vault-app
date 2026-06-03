@@ -2,7 +2,7 @@
 // hidden Supabase account AND the encryption key. PIN unlocks the device; safe
 // words unlock the cloud — that's the whole model. See docs/cloud-architecture.md.
 import { useCallback, useEffect, useState } from "react";
-import { Alert, ScrollView, Text, View } from "react-native";
+import { Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useVault } from "../../src/state/VaultContext";
@@ -18,12 +18,24 @@ export default function Cloud() {
   const { vault, cloud, unlocked } = useVault();
   const [linked, setLinked] = useState(false);
   const [safeWords, setSafeWords] = useState("");
+  const [showWords, setShowWords] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [account, setAccount] = useState<string | null>(null); // short uid fingerprint
+  const [cloudCount, setCloudCount] = useState<number | null>(null);
 
   const refresh = useCallback(async () => {
     if (!cloud) return;
     const uid = await cloud.auth.currentUserId();
-    setLinked(!!uid && unlocked && (await vault.cloudEnabled(cloud.store)));
+    const isLinked = !!uid && unlocked && (await vault.cloudEnabled(cloud.store));
+    setLinked(isLinked);
+    setAccount(uid ? uid.replace(/-/g, "").slice(0, 8) : null);
+    if (isLinked) {
+      try {
+        setCloudCount(await cloud.store.countItems());
+      } catch {
+        setCloudCount(null);
+      }
+    }
   }, [cloud, vault, unlocked]);
 
   useFocusEffect(useCallback(() => {
@@ -141,10 +153,17 @@ export default function Cloud() {
         <Section icon="cloud-outline" title="Connect with safe words">
           <Muted>
             Your safe words are the only key to your cloud vault — no email, no account to manage.
-            Enter the same words on any device to access your files. Supabase only ever stores
-            encrypted data and never sees your safe words.
+            Enter the EXACT same words (same spelling and capitalisation) on every device. Supabase
+            only ever stores encrypted data and never sees your safe words.
           </Muted>
-          <Field value={safeWords} onChangeText={setSafeWords} placeholder="Your safe words" secureTextEntry />
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <View style={{ flex: 1 }}>
+              <Field value={safeWords} onChangeText={setSafeWords} placeholder="Your safe words" secureTextEntry={!showWords} />
+            </View>
+            <Pressable onPress={() => setShowWords((s) => !s)} hitSlop={8} style={{ padding: 8 }}>
+              <Ionicons name={showWords ? "eye-off-outline" : "eye-outline"} size={22} color={theme.accent} />
+            </Pressable>
+          </View>
           <Button label={busy ?? "Connect & sync"} onPress={connect} loading={!!busy} />
           <Text style={{ color: theme.muted, fontSize: 11 }} selectable>
             Server: {SUPABASE_URL}
@@ -152,7 +171,15 @@ export default function Cloud() {
         </Section>
       ) : (
         <Section icon="cloud-done-outline" title="Connected">
-          <Muted>This device is syncing. Use the same safe words on another device to access everything there.</Muted>
+          <Muted>This device is syncing. Use the EXACT same safe words on another device to access everything there.</Muted>
+          <View style={{ backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, borderRadius: theme.radius, padding: 12, gap: 4 }}>
+            <Text style={{ color: theme.muted, fontSize: 12 }} selectable>
+              Account: <Text style={{ color: theme.text, fontWeight: "700" }}>{account ?? "…"}</Text>{"  "}(must match on every device)
+            </Text>
+            <Text style={{ color: theme.muted, fontSize: 12 }}>
+              Files in cloud: <Text style={{ color: theme.text, fontWeight: "700" }}>{cloudCount ?? "…"}</Text>
+            </Text>
+          </View>
           <Button label={busy ?? "Sync now"} onPress={syncNow} loading={!!busy} />
           <Button label="Disconnect this device" variant="outline" onPress={disconnect} />
         </Section>

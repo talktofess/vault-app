@@ -22,6 +22,9 @@ function rangeOnlyStore(path: string, object: Uint8Array): CloudStore {
     async listItemsSince() {
       return [];
     },
+    async countItems() {
+      return 0;
+    },
     async upsertItem() {},
     async markDeleted() {},
     async uploadObject() {},

@@ -110,6 +110,11 @@ function makeStore(c: SupabaseClient): CloudStore {
       if (error) throw error;
       return (data ?? []).map(mapRow);
     },
+    async countItems() {
+      const { count, error } = await c.from("items").select("id", { count: "exact", head: true }).is("deleted_at", null);
+      if (error) throw error;
+      return count ?? 0;
+    },
     async upsertItem(row) {
       const user_id = await requireUserId(c);
       const { error } = await c.from("items").upsert({

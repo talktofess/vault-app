@@ -30,6 +30,9 @@ function fakeCloud() {
       const all = [...items.values()].sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
       return cursor ? all.filter((r) => r.updatedAt > cursor) : all;
     },
+    async countItems() {
+      return [...items.values()].filter((r) => !r.deletedAt).length;
+    },
     async upsertItem(row) {
       const prev = items.get(row.id);
       items.set(row.id, { ...row, createdAt: prev?.createdAt ?? row.createdAt, updatedAt: stamp(), deletedAt: row.deletedAt ?? null });

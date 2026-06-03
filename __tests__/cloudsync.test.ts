@@ -25,6 +25,9 @@ function fakeStore() {
       const all = [...items.values()].sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
       return cursor ? all.filter((r) => r.updatedAt > cursor) : all;
     },
+    async countItems() {
+      return [...items.values()].filter((r) => !r.deletedAt).length;
+    },
     async upsertItem(row) {
       const updatedAt = `2026-01-01T00:00:${String(clock++).padStart(2, "0")}Z`;
       const prev = items.get(row.id);
