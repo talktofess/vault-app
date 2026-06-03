@@ -358,6 +358,35 @@ export class VaultService {
     await this.persistIndex();
   }
 
+  // ---- folders (albums) ----
+  // Explicitly-created folders, so an empty one survives a refresh/sync.
+  listFolders(): string[] {
+    this.requireUnlocked();
+    return [...(this.index!.folders ?? [])];
+  }
+
+  async createFolder(name: string): Promise<void> {
+    this.requireUnlocked();
+    const n = name.trim();
+    if (!n) return;
+    const set = new Set(this.index!.folders ?? []);
+    set.add(n);
+    this.index!.folders = [...set];
+    await this.persistIndex();
+  }
+
+  // Remove a folder. Any items still tagged with it are moved out (album cleared)
+  // unless `keepItems` is set, in which case the tag stays and the folder simply
+  // reappears as a content-derived album.
+  async deleteFolder(name: string, keepItems = false): Promise<void> {
+    this.requireUnlocked();
+    this.index!.folders = (this.index!.folders ?? []).filter((f) => f !== name);
+    if (!keepItems) {
+      for (const it of this.index!.items) if (it.album === name) it.album = undefined;
+    }
+    await this.persistIndex();
+  }
+
   /** Rename, move to an album (album: "" clears), and/or pin an item. */
   async updateItemMeta(
     id: string,

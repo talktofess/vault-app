@@ -142,6 +142,29 @@ try {
   await page.waitForTimeout(800);
   await shot(page, "08-notes-section");
 
+  // Folders: create a directory, then add a file into it
+  await page.click('[data-testid="tab-folders"]');
+  await page.waitForTimeout(700);
+  await shot(page, "10-folders-empty"); // "New folder" tile
+  await page.click('[data-testid="new-folder-tile"]');
+  await page.waitForTimeout(500);
+  await page.getByPlaceholder("Folder name").fill("Trip");
+  await shot(page, "10b-new-folder");
+  await page.getByText("Create", { exact: true }).click();
+  await page.waitForTimeout(900); // opens the (empty) folder
+  await shot(page, "10c-folder-open");
+  // add files into the open folder
+  await page.click('[data-testid="fab-add"]'); // "Add to folder" -> import menu
+  await page.waitForTimeout(500);
+  await page.getByText("Any file(s)").click();
+  await page.waitForTimeout(2500);
+  await page.getByText("Save", { exact: true }).click();
+  await page.waitForTimeout(1800);
+  await shot(page, "10d-folder-filled"); // items now inside the folder
+  await page.click('[data-testid="nav-back"]'); // back to the folders list
+  await page.waitForTimeout(700);
+  await shot(page, "10e-folders-list"); // "Trip · N items"
+
   // narrow viewport: the tab bar should move to the bottom (phone layout)
   await page.setViewportSize({ width: 390, height: 800 });
   await page.waitForTimeout(800);

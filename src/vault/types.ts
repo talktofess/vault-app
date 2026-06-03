@@ -71,6 +71,10 @@ export interface VaultManifest {
 // The item index, stored ENCRYPTED under the DEK (so even names are private).
 export interface VaultIndex {
   items: VaultItem[];
+  // User-created folders (albums) — tracked explicitly so an empty folder
+  // persists even before anything is put in it. Item albums also count as
+  // folders; this just keeps the empty ones around.
+  folders?: string[];
   // High-water mark for incremental cloud pulls (max server updatedAt seen).
   syncCursor?: string;
 }

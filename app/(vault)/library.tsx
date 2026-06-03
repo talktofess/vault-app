@@ -83,6 +83,7 @@ const TABS: { key: Section; label: string }[] = [
 export default function Library() {
   const { vault, unlocked, cloud } = useVault();
   const [items, setItems] = useState<VaultItem[]>([]);
+  const [folders, setFolders] = useState<string[]>([]); // explicitly-created folders
   const [query, setQuery] = useState("");
   // "home" = the category tiles; "all"/"folders"/a category = a focused view.
   const [section, setSection] = useState<Section>("home");
@@ -107,6 +108,7 @@ export default function Library() {
   const [details, setDetails] = useState<VaultItem | null>(null);
   const [albumTarget, setAlbumTarget] = useState<AlbumTarget | null>(null);
   const [currentAlbum, setCurrentAlbum] = useState<string | null>(null); // open folder
+  const [newFolderOpen, setNewFolderOpen] = useState(false); // create-folder prompt
   const [renaming, setRenaming] = useState<VaultItem | null>(null);
   const [review, setReview] = useState<Pending[] | null>(null); // pre-upload review
   const [reviewBusy, setReviewBusy] = useState(false);
@@ -114,7 +116,10 @@ export default function Library() {
   const pendingAssetIds = useRef<string[]>([]); // gallery ids to optionally delete after saving
 
   const refresh = useCallback(() => {
-    if (unlocked) setItems(vault.listItems().filter((i) => i.type !== "credential"));
+    if (unlocked) {
+      setItems(vault.listItems().filter((i) => i.type !== "credential"));
+      setFolders(vault.listFolders());
+    }
   }, [vault, unlocked]);
 
   useFocusEffect(
@@ -179,12 +184,14 @@ export default function Library() {
     return c;
   }, [items]);
 
-  // Folders (albums) with their item counts.
+  // Folders (albums) with their item counts — explicitly-created folders are
+  // included (count 0 until something is added), plus any content-derived ones.
   const albums = useMemo(() => {
     const m = new Map<string, number>();
+    for (const f of folders) m.set(f, 0);
     for (const i of items) if (i.album) m.set(i.album, (m.get(i.album) ?? 0) + 1);
     return [...m.entries()].map(([name, n]) => ({ name, n })).sort((a, b) => a.name.localeCompare(b.name));
-  }, [items]);
+  }, [items, folders]);
 
   // Categories that actually have items, for the home tiles.
   const homeCats = useMemo(() => {
@@ -209,30 +216,46 @@ export default function Library() {
     }
   }
 
+  // Create a new (empty) folder and open it, so files can be added into it.
+  async function makeFolder(name: string) {
+    const n = name.trim();
+    setNewFolderOpen(false);
+    if (!n) return;
+    await vault.createFolder(n);
+    refresh();
+    setSection("folders");
+    setQuery("");
+    setCurrentAlbum(n);
+  }
+
   // The add action + label for the current section, so each format's view has
-  // its own "Add videos" / "Add photos" / "Add files" button.
+  // its own "Add videos" / "Add photos" / "Add files" button. Inside a folder,
+  // adding drops the files into that folder; the Folders root creates one.
   function addForSection() {
+    if (currentAlbum !== null) return setImportMenu(true); // add into the open folder
     if (section === "image") return importPhotos("image");
     if (section === "video") return importPhotos("video");
     if (section === "note") return newNote();
-    if (section === "folders") return importFolder();
+    if (section === "folders") return setNewFolderOpen(true);
     if (section === "home" || section === "all") return setImportMenu(true);
     return importFiles(); // audio / document / apk / archive / other
   }
   const addLabel =
-    section === "image"
-      ? "Add photos"
-      : section === "video"
-        ? "Add videos"
-        : section === "note"
-          ? "Add note"
-          : section === "folders"
-            ? "Add folder"
-            : section === "audio"
-              ? "Add audio"
-              : section === "document"
-                ? "Add docs"
-                : "Add files";
+    currentAlbum !== null
+      ? "Add to folder"
+      : section === "image"
+        ? "Add photos"
+        : section === "video"
+          ? "Add videos"
+          : section === "note"
+            ? "Add note"
+            : section === "folders"
+              ? "New folder"
+              : section === "audio"
+                ? "Add audio"
+                : section === "document"
+                  ? "Add docs"
+                  : "Add files";
 
   // ---- gallery review: step through previewable media in the current view ----
   const isPreviewable = (it: VaultItem) => {
@@ -347,7 +370,7 @@ export default function Library() {
           }
           const ext = (mime?.split("/")[1] || "bin").replace("jpeg", "jpg").replace("quicktime", "mov");
           const name = asset.fileName ?? `${isVideo ? "video" : isAudio ? "audio" : "photo"}_${Date.now()}.${ext}`;
-          pend.push(await toPending(name, bytes, mime, "media"));
+          pend.push(await toPending(name, bytes, mime, "media", currentAlbum ?? undefined));
           if (asset.assetId) ids.push(asset.assetId);
         } catch {
           /* skip unreadable */
@@ -375,7 +398,7 @@ export default function Library() {
             (asset.name.toLowerCase().endsWith(".apk") ? "application/vnd.android.package-archive" : undefined);
           const m = mime ?? "";
           const type = m.startsWith("image") || m.startsWith("video") || m.startsWith("audio") ? "media" : "file";
-          pend.push(await toPending(asset.name, bytes, mime, type));
+          pend.push(await toPending(asset.name, bytes, mime, type, currentAlbum ?? undefined));
         } catch {
           /* skip */
         }
@@ -811,16 +834,34 @@ export default function Library() {
           </View>
         </ScrollView>
       ) : section === "folders" && currentAlbum === null ? (
-        // folders: a grid of album tiles
+        // folders: a grid of album tiles, led by a "New folder" tile
         <ScrollView contentContainerStyle={{ paddingBottom: 90 }}>
-          {albums.length === 0 ? (
-            <Muted>No folders yet. Import a whole folder from “+ Add to vault”.</Muted>
-          ) : (
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
-              {albums.map((a) => (
-                <CategoryTile key={a.name} label={a.name} icon="folder" color="#c79a63" count={a.n} onPress={() => setCurrentAlbum(a.name)} />
-              ))}
-            </View>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+            <Pressable
+              onPress={() => setNewFolderOpen(true)}
+              testID="new-folder-tile"
+              style={{
+                width: "23%",
+                aspectRatio: 1,
+                borderRadius: theme.radius,
+                backgroundColor: theme.surface,
+                borderWidth: 1.5,
+                borderColor: theme.accent,
+                borderStyle: "dashed",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+              }}
+            >
+              <Ionicons name="add-circle-outline" size={26} color={theme.accent} />
+              <Text style={{ color: theme.accent, fontWeight: "700", fontSize: 12 }}>New folder</Text>
+            </Pressable>
+            {albums.map((a) => (
+              <CategoryTile key={a.name} label={a.name} icon="folder" color="#c79a63" count={a.n} onPress={() => setCurrentAlbum(a.name)} />
+            ))}
+          </View>
+          {albums.length === 0 && (
+            <Muted>{"\n"}Create a folder above, then open it and tap “Add to folder”. On a computer you can also import a whole folder from “+ Add to vault”.</Muted>
           )}
         </ScrollView>
       ) : visible.length === 0 ? (
@@ -837,15 +878,17 @@ export default function Library() {
               justifyContent: "center",
             }}
           >
-            <Ionicons name={items.length === 0 ? "lock-closed-outline" : "search-outline"} size={38} color={theme.accent} />
+            <Ionicons name={currentAlbum !== null ? "folder-open-outline" : items.length === 0 ? "lock-closed-outline" : "search-outline"} size={38} color={theme.accent} />
           </View>
           <Text style={{ color: theme.text, fontSize: 17, fontWeight: "700" }}>
-            {items.length === 0 ? "Your vault is empty" : "Nothing here"}
+            {currentAlbum !== null ? "This folder is empty" : items.length === 0 ? "Your vault is empty" : "Nothing here"}
           </Text>
           <Text style={{ color: theme.muted, fontSize: 14, lineHeight: 21, textAlign: "center", paddingHorizontal: 30 }}>
-            {items.length === 0
-              ? "Tap “Add to vault” to bring in photos, videos, documents, APKs — anything. It’s all encrypted."
-              : "No items match this filter or search."}
+            {currentAlbum !== null
+              ? "Tap “Add to folder” to put photos, videos or files in here."
+              : items.length === 0
+                ? "Tap “Add to vault” to bring in photos, videos, documents, APKs — anything. It’s all encrypted."
+                : "No items match this filter or search."}
           </Text>
         </View>
       ) : (
@@ -1359,10 +1402,13 @@ export default function Library() {
       {/* album picker */}
       <AlbumPicker
         target={albumTarget}
-        albums={unlocked ? vault.albums() : []}
+        albums={albums.map((a) => a.name)}
         onCancel={() => setAlbumTarget(null)}
         onPick={(name) => albumTarget && applyAlbum(albumTarget.ids, name)}
       />
+
+      {/* create folder */}
+      <CreateFolderModal visible={newFolderOpen} onCancel={() => setNewFolderOpen(false)} onCreate={makeFolder} />
 
       {/* rename */}
       <RenameModal item={renaming} onCancel={() => setRenaming(null)} onSave={(name) => renaming && doRename(renaming, name)} />
@@ -1610,6 +1656,31 @@ function AlbumPicker({ target, albums, onCancel, onPick }: { target: AlbumTarget
             </View>
             <View style={{ flex: 1 }}>
               <Button label="Cancel" variant="outline" onPress={() => { setName(""); onCancel(); }} />
+            </View>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function CreateFolderModal({ visible, onCancel, onCreate }: { visible: boolean; onCancel: () => void; onCreate: (name: string) => void }) {
+  const [name, setName] = useState("");
+  useEffect(() => {
+    if (!visible) setName("");
+  }, [visible]);
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
+      <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", padding: 20 }}>
+        <View style={{ backgroundColor: theme.bg, borderRadius: theme.radius, borderWidth: 1, borderColor: theme.border, padding: 20, gap: 12 }}>
+          <Text style={{ color: theme.text, fontSize: 18, fontWeight: "700" }}>New folder</Text>
+          <Field value={name} onChangeText={setName} placeholder="Folder name" autoFocus />
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <View style={{ flex: 1 }}>
+              <Button label="Cancel" variant="outline" onPress={onCancel} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Button label="Create" onPress={() => onCreate(name)} />
             </View>
           </View>
         </View>
