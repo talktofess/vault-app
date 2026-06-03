@@ -60,26 +60,38 @@ try {
   await shot(page, "04-review"); // pre-upload review screen
   await page.getByText("Save", { exact: true }).click();
   await page.waitForTimeout(2000);
-  await shot(page, "05-after-save"); // library with the saved items
+  await shot(page, "05-home-tiles"); // home: category tiles
 
-  // open the image (preview layout)
+  // open the Videos category (focused fullscreen view)
+  await page.getByText("Videos", { exact: false }).first().click();
+  await page.waitForTimeout(1000);
+  await shot(page, "06-videos-section");
+  // back to home
+  await page.click('[data-testid="nav-back"]', { timeout: 8000 });
+  await page.waitForTimeout(700);
+
+  // open All -> open the image preview
+  await page.getByText("All", { exact: true }).first().click();
+  await page.waitForTimeout(800);
   await page.getByText("photo.png", { exact: false }).first().click();
   await page.waitForTimeout(1500);
-  await shot(page, "06-preview");
-  await page.mouse.click(28, 58); // close (X top-left)
-  await page.waitForTimeout(800);
+  await shot(page, "07-preview");
+  await page.mouse.click(28, 58); // close the media preview overlay
 
-  // create a note, then see it in the list (title + body snippet)
+  // back to home, then make a note and view it via the Notes tile
+  await page.click('[data-testid="nav-back"]', { timeout: 8000 });
+  await page.waitForTimeout(500);
   await page.click('[data-testid="fab-add"]');
   await page.waitForTimeout(400);
   await page.getByText("New note").click();
   await page.waitForTimeout(700);
   await page.getByPlaceholder("Title").fill("Shopping list");
   await page.getByPlaceholder(/Start writing/).fill("- [ ] milk\n- [x] eggs\nGet bread too");
-  await page.waitForTimeout(300);
   await page.getByText("Save", { exact: true }).click();
   await page.waitForTimeout(1200);
-  await shot(page, "07-note-in-list");
+  await page.getByText("Notes", { exact: false }).first().click();
+  await page.waitForTimeout(800);
+  await shot(page, "08-notes-section");
 } catch (e) {
   console.log("ERROR:", e.message);
   await shot(page, "99-error");

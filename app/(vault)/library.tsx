@@ -65,7 +65,8 @@ export default function Library() {
   const { vault, unlocked, cloud } = useVault();
   const [items, setItems] = useState<VaultItem[]>([]);
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<FileCategory | "all">("all");
+  // "home" = the category tiles; "all"/"folders"/a category = a focused view.
+  const [section, setSection] = useState<"home" | "all" | "folders" | FileCategory>("home");
   const [sort, setSort] = useState<Sort>("new");
   const [grid, setGrid] = useState(false);
 
@@ -103,12 +104,13 @@ export default function Library() {
     }, [refresh])
   );
 
-  // ---- derived list: folder + filter + search + sort ----
+  // ---- derived list: section + folder + search + sort ----
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const isCat = section !== "home" && section !== "all" && section !== "folders";
     let list = items.filter((i) => {
       if (currentAlbum !== null && (i.album ?? "") !== currentAlbum) return false;
-      if (filter !== "all" && categorize(i) !== filter) return false;
+      if (isCat && categorize(i) !== section) return false;
       if (q) {
         const inName = i.name.toLowerCase().includes(q);
         const inBody = i.type === "note" && (noteBodies[i.id] ?? "").toLowerCase().includes(q);
@@ -123,7 +125,7 @@ export default function Library() {
       return b.createdAt - a.createdAt;
     });
     return list;
-  }, [items, query, filter, sort, currentAlbum, noteBodies]);
+  }, [items, query, section, sort, currentAlbum, noteBodies]);
 
   // Cache decrypted note bodies (lowercased) so search can match note contents.
   useEffect(() => {
@@ -156,12 +158,35 @@ export default function Library() {
     return c;
   }, [items]);
 
-  // Folders (albums) with their item counts, for the folder cards.
+  // Folders (albums) with their item counts.
   const albums = useMemo(() => {
     const m = new Map<string, number>();
     for (const i of items) if (i.album) m.set(i.album, (m.get(i.album) ?? 0) + 1);
     return [...m.entries()].map(([name, n]) => ({ name, n })).sort((a, b) => a.name.localeCompare(b.name));
   }, [items]);
+
+  // Categories that actually have items, for the home tiles.
+  const homeCats = useMemo(() => {
+    const order: FileCategory[] = ["image", "video", "audio", "document", "apk", "archive", "note", "other"];
+    return order.filter((c) => (counts[c] ?? 0) > 0);
+  }, [counts]);
+
+  const sectionLabel = (s: typeof section) =>
+    s === "all" ? "All items" : s === "folders" ? "Folders" : FILTERS.find((f) => f.key === s)?.label ?? "Items";
+
+  function openSection(s: typeof section) {
+    setCurrentAlbum(null);
+    setQuery("");
+    setGrid(s === "image" || s === "video" || s === "all"); // visual types open as a grid
+    setSection(s);
+  }
+  function goBack() {
+    if (currentAlbum !== null) setCurrentAlbum(null);
+    else {
+      setSection("home");
+      setQuery("");
+    }
+  }
 
   // ---- gallery review: step through previewable media in the current view ----
   const isPreviewable = (it: VaultItem) => {
@@ -595,103 +620,77 @@ export default function Library() {
 
   return (
     <Screen>
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-        <Title>Vault</Title>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        {section === "home" ? (
+          <Title>Vault</Title>
+        ) : (
+          <Pressable testID="nav-back" onPress={goBack} hitSlop={6} style={{ flexDirection: "row", alignItems: "center", gap: 4, flex: 1 }}>
+            <Ionicons name="chevron-back" size={26} color={theme.text} />
+            <Text numberOfLines={1} style={{ color: theme.text, fontSize: 24, fontWeight: "800", letterSpacing: -0.4 }}>
+              {currentAlbum ?? sectionLabel(section)}
+            </Text>
+          </Pressable>
+        )}
         <View style={{ flexDirection: "row", gap: 16, alignItems: "center" }}>
           {cloud && !selectMode && (
             <Pressable onPress={() => runSync(false)} hitSlop={8} disabled={syncing}>
-              {syncing ? (
-                <ActivityIndicator size="small" color={theme.accent} />
-              ) : (
-                <Ionicons name="sync" size={20} color={theme.accent} />
-              )}
+              {syncing ? <ActivityIndicator size="small" color={theme.accent} /> : <Ionicons name="sync" size={20} color={theme.accent} />}
             </Pressable>
           )}
-          {!selectMode && (
+          {section !== "home" && !selectMode && (
             <Pressable onPress={() => setGrid((g) => !g)} hitSlop={8}>
               <Ionicons name={grid ? "list-outline" : "grid-outline"} size={20} color={theme.accent} />
             </Pressable>
           )}
-          <Pressable onPress={() => setSort(sort === "new" ? "name" : sort === "name" ? "size" : "new")}>
-            <Text style={{ color: theme.accent, fontWeight: "600" }}>
-              {sort === "new" ? "Newest" : sort === "name" ? "A–Z" : "Largest"}
-            </Text>
-          </Pressable>
-          <Pressable onPress={() => (selectMode ? clearSelect() : setSelectMode(true))}>
-            <Text style={{ color: theme.accent, fontWeight: "600" }}>{selectMode ? "Done" : "Select"}</Text>
-          </Pressable>
+          {section !== "home" && (
+            <Pressable onPress={() => setSort(sort === "new" ? "name" : sort === "name" ? "size" : "new")}>
+              <Text style={{ color: theme.accent, fontWeight: "600" }}>{sort === "new" ? "Newest" : sort === "name" ? "A–Z" : "Largest"}</Text>
+            </Pressable>
+          )}
+          {section !== "home" && (
+            <Pressable onPress={() => (selectMode ? clearSelect() : setSelectMode(true))}>
+              <Text style={{ color: theme.accent, fontWeight: "600" }}>{selectMode ? "Done" : "Select"}</Text>
+            </Pressable>
+          )}
         </View>
       </View>
 
-      <Field value={query} onChangeText={setQuery} placeholder="Search everything…" />
+      <Field value={query} onChangeText={setQuery} placeholder={section === "home" ? "Search everything…" : "Search…"} />
 
-      {/* filter chips */}
-      <View style={{ height: 38 }}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-          {FILTERS.map((f) => {
-            const active = filter === f.key;
-            const n = counts[f.key] ?? 0;
-            if (f.key !== "all" && n === 0) return null;
-            return (
-              <Pressable
-                key={f.key}
-                onPress={() => setFilter(f.key)}
-                style={{
-                  paddingHorizontal: 14,
-                  height: 34,
-                  borderRadius: 17,
-                  justifyContent: "center",
-                  backgroundColor: active ? theme.accent : theme.surface,
-                  borderWidth: 1,
-                  borderColor: active ? theme.accent : theme.border,
-                }}
-              >
-                <Text style={{ color: active ? theme.accentText : theme.text, fontWeight: "600", fontSize: 13 }}>
-                  {f.label} {n > 0 ? n : ""}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </View>
-
-      {/* folders (albums): cards to open, or a breadcrumb when inside one */}
-      {currentAlbum !== null ? (
-        <Pressable onPress={() => setCurrentAlbum(null)} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <Ionicons name="chevron-back" size={18} color={theme.accent} />
-          <Ionicons name="folder-open" size={16} color={theme.accent} />
-          <Text style={{ color: theme.text, fontWeight: "700" }} numberOfLines={1}>{currentAlbum}</Text>
-          <Text style={{ color: theme.muted }}>· back to all</Text>
-        </Pressable>
-      ) : albums.length > 0 && filter === "all" && !query.trim() ? (
-        <View style={{ height: 88 }}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
-            {albums.map((a) => (
-              <Pressable
-                key={a.name}
-                onPress={() => setCurrentAlbum(a.name)}
-                style={{
-                  width: 124,
-                  borderRadius: theme.radius,
-                  padding: 12,
-                  backgroundColor: theme.surface,
-                  borderWidth: 1,
-                  borderColor: theme.border,
-                  justifyContent: "space-between",
-                }}
-              >
-                <Ionicons name="folder" size={26} color={theme.accent} />
-                <View style={{ marginTop: 10 }}>
-                  <Text numberOfLines={1} style={{ color: theme.text, fontWeight: "600", fontSize: 13 }}>{a.name}</Text>
-                  <Text style={{ color: theme.muted, fontSize: 11 }}>{a.n} item{a.n === 1 ? "" : "s"}</Text>
-                </View>
-              </Pressable>
+      {section === "home" && !query.trim() && items.length > 0 ? (
+        // home: a grid of category tiles
+        <ScrollView contentContainerStyle={{ paddingBottom: 90 }}>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+            <CategoryTile label="All" icon="albums-outline" color={theme.accent} count={items.length} onPress={() => openSection("all")} />
+            {albums.length > 0 && (
+              <CategoryTile label="Folders" icon="folder-outline" color="#c79a63" count={albums.length} onPress={() => openSection("folders")} />
+            )}
+            {homeCats.map((c) => (
+              <CategoryTile
+                key={c}
+                label={FILTERS.find((f) => f.key === c)?.label ?? c}
+                icon={CATEGORY_ICON[c]}
+                color={CATEGORY_COLOR[c]}
+                count={counts[c] ?? 0}
+                onPress={() => openSection(c)}
+              />
             ))}
-          </ScrollView>
-        </View>
-      ) : null}
-
-      {visible.length === 0 ? (
+          </View>
+        </ScrollView>
+      ) : section === "folders" && currentAlbum === null ? (
+        // folders: a grid of album tiles
+        <ScrollView contentContainerStyle={{ paddingBottom: 90 }}>
+          {albums.length === 0 ? (
+            <Muted>No folders yet. Import a whole folder from “+ Add to vault”.</Muted>
+          ) : (
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+              {albums.map((a) => (
+                <CategoryTile key={a.name} label={a.name} icon="folder" color="#c79a63" count={a.n} onPress={() => setCurrentAlbum(a.name)} />
+              ))}
+            </View>
+          )}
+        </ScrollView>
+      ) : visible.length === 0 ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 14, paddingBottom: 60 }}>
           <View
             style={{
@@ -1193,6 +1192,32 @@ function Thumb({ item, getBytes, fill }: { item: VaultItem; getBytes: (i: VaultI
     );
   }
   return <Image source={{ uri }} style={box} resizeMode="cover" />;
+}
+
+function CategoryTile({ label, icon, color, count, onPress }: { label: string; icon: keyof typeof Ionicons.glyphMap; color: string; count: number; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={{
+        width: "31.5%",
+        aspectRatio: 1,
+        borderRadius: theme.radius,
+        backgroundColor: theme.surface,
+        borderWidth: 1,
+        borderColor: theme.border,
+        padding: 14,
+        justifyContent: "space-between",
+      }}
+    >
+      <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: color + "22", alignItems: "center", justifyContent: "center" }}>
+        <Ionicons name={icon} size={24} color={color} />
+      </View>
+      <View>
+        <Text numberOfLines={1} style={{ color: theme.text, fontWeight: "700", fontSize: 15 }}>{label}</Text>
+        <Text style={{ color: theme.muted, fontSize: 12 }}>{count} item{count === 1 ? "" : "s"}</Text>
+      </View>
+    </Pressable>
+  );
 }
 
 function MdBtn({ label, icon, onPress }: { label?: string; icon?: keyof typeof Ionicons.glyphMap; onPress: () => void }) {
