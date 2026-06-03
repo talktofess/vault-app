@@ -204,7 +204,9 @@ try {
   await page.waitForTimeout(400);
   await page.getByText("Whole folder").click();
   await page.waitForTimeout(5000); // streams the directory's files straight in
-  await shot(page, "11-folder-imported");
+  await shot(page, "11-folder-imported"); // shows the now-working "Folder imported" alert
+  await page.getByText("OK", { exact: true }).click().catch(() => {}); // dismiss the alert
+  await page.waitForTimeout(300);
   await page.click('[data-testid="tab-folders"]');
   await page.waitForTimeout(800);
   await shot(page, "11b-imported-albums"); // the folder's subfolders became albums
@@ -225,6 +227,8 @@ try {
   pendingFiles = [{ name: "contacts.vcf", mimeType: "text/vcard", buffer: VCF }];
   await page.click('[data-testid="contacts-import"]');
   await page.waitForTimeout(1500);
+  await page.getByText("OK", { exact: true }).click().catch(() => {}); // dismiss "Contacts imported"
+  await page.waitForTimeout(300);
   await shot(page, "13-contacts");
 
   // Chats: import a WhatsApp export and open it
