@@ -1,6 +1,13 @@
 // Web folder import via a hidden <input webkitdirectory>. Reads every file in
 // the chosen folder (recursively, including subfolders) into memory so the
 // Library can encrypt + store them, preserving the folder layout as albums.
+//
+// Resolution is driven only by the input's own `change` (files chosen) and
+// `cancel` (dismissed) events. We deliberately do NOT use a window-focus +
+// timeout heuristic to detect cancel: Chrome shows an "Upload N files to this
+// site?" confirmation AFTER focus returns, so any short timeout fires while the
+// user is still confirming, resolves empty, and the real selection is then
+// dropped — which is exactly why "whole folder" appeared to do nothing.
 export interface PickedFile {
   name: string;
   bytes: Uint8Array;
@@ -19,54 +26,36 @@ export async function pickFolder(): Promise<PickedFile[]> {
     input.multiple = true;
     input.style.display = "none";
 
-    let settled = false;
-    const cleanup = () => {
-      window.removeEventListener("focus", onFocus);
+    let done = false;
+    const finish = (run: () => void) => {
+      if (done) return;
+      done = true;
       input.remove();
+      run();
     };
 
-    input.onchange = async () => {
-      if (settled) return;
-      settled = true;
-      try {
-        const files = Array.from(input.files ?? []);
-        const out: PickedFile[] = [];
-        for (const f of files) {
-          const bytes = new Uint8Array(await f.arrayBuffer());
-          out.push({
-            name: f.name,
-            bytes,
-            mime: f.type || undefined,
-            relPath: (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name,
-          });
+    input.addEventListener("change", () => {
+      const files = Array.from(input.files ?? []);
+      void (async () => {
+        try {
+          const out: PickedFile[] = [];
+          for (const f of files) {
+            out.push({
+              name: f.name,
+              bytes: new Uint8Array(await f.arrayBuffer()),
+              mime: f.type || undefined,
+              relPath: (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name,
+            });
+          }
+          finish(() => resolve(out));
+        } catch (e) {
+          finish(() => reject(e instanceof Error ? e : new Error("Folder read failed")));
         }
-        resolve(out);
-      } catch (e) {
-        reject(e instanceof Error ? e : new Error("Folder read failed"));
-      } finally {
-        cleanup();
-      }
-    };
-
-    // Cancel handling so the caller's spinner never hangs: modern browsers fire
-    // a 'cancel' event; older ones only return window focus with no files.
-    input.addEventListener("cancel", () => {
-      if (!settled) {
-        settled = true;
-        cleanup();
-        resolve([]);
-      }
+      })();
     });
-    const onFocus = () => {
-      setTimeout(() => {
-        if (!settled && (!input.files || input.files.length === 0)) {
-          settled = true;
-          cleanup();
-          resolve([]);
-        }
-      }, 800);
-    };
-    window.addEventListener("focus", onFocus);
+
+    // Modern browsers fire 'cancel' when the dialog is dismissed with no choice.
+    input.addEventListener("cancel", () => finish(() => resolve([])));
 
     document.body.appendChild(input);
     input.click();

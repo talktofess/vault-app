@@ -8,6 +8,7 @@ import { mkdirSync, readFileSync } from "node:fs";
 const BASE = process.env.BASE || "http://localhost:4599";
 const OUT = fileURLToPath(new URL("../shots/", import.meta.url));
 const SAMPLE_MP4 = readFileSync(fileURLToPath(new URL("./fixtures/sample.mp4", import.meta.url)));
+const FOLDER_DIR = fileURLToPath(new URL("./fixtures/folder1", import.meta.url));
 mkdirSync(OUT, { recursive: true });
 
 // a 2x2 red PNG
@@ -56,12 +57,23 @@ try {
   await page.keyboard.type("1234");
   await page.waitForTimeout(2000); // unlocks -> redirects back to the library
 
-  // import: image + a real (tiny) video, via the file chooser
+  // file chooser: a webkitdirectory input (Whole folder) gets the fixture dir;
+  // any other file input gets the image + a real (tiny) video.
   page.on("filechooser", async (fc) => {
-    await fc.setFiles([
-      { name: "photo.png", mimeType: "image/png", buffer: PNG },
-      { name: "sample.mp4", mimeType: "video/mp4", buffer: SAMPLE_MP4 }, // real 3s mp4 so the trimmer can decode/cut it
-    ]);
+    let isDir = false;
+    try {
+      isDir = await fc.element().evaluate((el) => el.webkitdirectory === true);
+    } catch {
+      /* not a directory input */
+    }
+    if (isDir) {
+      await fc.setFiles(FOLDER_DIR); // Playwright uploads the directory, preserving relative paths
+    } else {
+      await fc.setFiles([
+        { name: "photo.png", mimeType: "image/png", buffer: PNG },
+        { name: "sample.mp4", mimeType: "video/mp4", buffer: SAMPLE_MP4 }, // real 3s mp4 so the trimmer can decode/cut it
+      ]);
+    }
   });
   await page.click('[data-testid="fab-add"]', { timeout: 8000 });
   await page.waitForTimeout(600);
@@ -164,6 +176,20 @@ try {
   await page.click('[data-testid="nav-back"]'); // back to the folders list
   await page.waitForTimeout(700);
   await shot(page, "10e-folders-list"); // "Trip · N items"
+
+  // Whole-folder import (webkitdirectory) — the desktop path that was broken
+  await page.click('[data-testid="tab-home"]');
+  await page.waitForTimeout(500);
+  await page.click('[data-testid="fab-add"]'); // round + opens the full menu on Home
+  await page.waitForTimeout(400);
+  await page.getByText("Whole folder").click();
+  await page.waitForTimeout(3000); // directory read + review screen
+  await shot(page, "11-folder-import-review");
+  await page.getByText("Save", { exact: true }).click();
+  await page.waitForTimeout(2000);
+  await page.click('[data-testid="tab-folders"]');
+  await page.waitForTimeout(800);
+  await shot(page, "11b-imported-albums"); // the folder's subfolders became albums
 
   // narrow viewport: the tab bar should move to the bottom (phone layout)
   await page.setViewportSize({ width: 390, height: 800 });
