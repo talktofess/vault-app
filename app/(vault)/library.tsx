@@ -119,6 +119,8 @@ export default function Library() {
   const [review, setReview] = useState<Pending[] | null>(null); // pre-upload review
   const [reviewBusy, setReviewBusy] = useState(false);
   const [trimming, setTrimming] = useState<Pending | null>(null); // video being trimmed
+  const [cloudLinked, setCloudLinked] = useState<boolean | null>(null); // null = unknown
+  const [syncBannerOff, setSyncBannerOff] = useState(false);
   const pendingAssetIds = useRef<string[]>([]); // gallery ids to optionally delete after saving
 
   const refresh = useCallback(() => {
@@ -132,6 +134,16 @@ export default function Library() {
     useCallback(() => {
       refresh();
       void runSync(true); // opportunistic background sync on entering the Library
+      // is this device linked to cloud sync? (drives the "connect" prompt)
+      (async () => {
+        if (!cloud) return; // no cloud configured -> no prompt
+        try {
+          const uid = await cloud.auth.currentUserId();
+          setCloudLinked(!!uid && (await vault.cloudEnabled(cloud.store)));
+        } catch {
+          setCloudLinked(false);
+        }
+      })();
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [refresh])
   );
@@ -638,6 +650,60 @@ export default function Library() {
     }
   }
 
+  // Back this item up to Supabase now (encrypted).
+  async function backupItem(item: VaultItem) {
+    if (!cloud) return;
+    setBusy("Backing up…");
+    try {
+      const uid = await cloud.auth.currentUserId();
+      if (!uid) throw new Error("Connect cloud sync first (Settings → Cloud sync).");
+      await vault.enableBackup(cloud.store, uid, item.id);
+      refresh();
+    } catch (e) {
+      Alert.alert("Backup failed", e instanceof Error ? e.message : "Failed.");
+    } finally {
+      setBusy(null);
+      setDetails(null);
+    }
+  }
+
+  // Remove the Supabase backup but keep the file on this device.
+  async function removeBackup(item: VaultItem) {
+    if (!cloud) return;
+    setBusy("Removing backup…");
+    try {
+      await vault.deleteFromCloud(cloud.store, item.id);
+      refresh();
+    } catch (e) {
+      Alert.alert("Couldn't remove backup", e instanceof Error ? e.message : "Failed.");
+    } finally {
+      setBusy(null);
+      setDetails(null);
+    }
+  }
+
+  // Delete from both this device AND the cloud.
+  function deleteEverywhere(item: VaultItem) {
+    Alert.alert("Delete everywhere?", `"${item.name}" will be removed from this device and your Supabase backup.`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete everywhere",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            if (cloud) await vault.deleteEverywhere(cloud.store, item.id);
+            else await vault.deleteItem(item.id);
+            refresh();
+          } catch (e) {
+            Alert.alert("Delete failed", e instanceof Error ? e.message : "Failed.");
+          } finally {
+            setDetails(null);
+          }
+        },
+      },
+    ]);
+  }
+
   // Push new local items + pull remote changes. silent = used for automatic
   // background syncs (on focus / after import); loud = the manual Sync button.
   const runSync = useCallback(
@@ -854,6 +920,23 @@ export default function Library() {
           );
         })}
       </ScrollView>
+
+      {/* cloud-sync prompt — shown until this device is linked */}
+      {section === "home" && cloud && cloudLinked === false && !syncBannerOff && (
+        <Pressable
+          onPress={() => router.push("/(vault)/cloud")}
+          style={{ flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: theme.surfaceAlt, borderWidth: 1, borderColor: theme.border, borderRadius: theme.radius, padding: 12, marginBottom: 8 }}
+        >
+          <Ionicons name="cloud-outline" size={22} color={theme.accent} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: theme.text, fontWeight: "700", fontSize: 13 }}>Sync across your devices</Text>
+            <Text style={{ color: theme.muted, fontSize: 12 }}>Connect with your safe words to see this vault on every device.</Text>
+          </View>
+          <Pressable onPress={() => setSyncBannerOff(true)} hitSlop={10}>
+            <Ionicons name="close" size={18} color={theme.muted} />
+          </Pressable>
+        </Pressable>
+      )}
 
       {section === "folders" && currentAlbum === null ? (
         // folders: a grid of album tiles, led by a "New folder" tile
@@ -1382,14 +1465,35 @@ export default function Library() {
             <SheetRow icon="share-outline" label="Export" onPress={() => { const d = details; setDetails(null); d && exportItem(d); }} />
             <SheetRow icon="create-outline" label="Rename" onPress={() => setRenaming(details)} />
             <SheetRow icon={details.pinned ? "star" : "star-outline"} label={details.pinned ? "Unpin" : "Pin to top"} onPress={() => togglePin(details)} />
-            {details.remote && details.cached === false && (
-              <SheetRow icon="cloud-download-outline" label="Download (cache offline)" sub="Keep a copy on this device" onPress={() => cacheItem(details)} />
-            )}
-            {details.remote && details.cached !== false && (
-              <SheetRow icon="cloud-done-outline" label="Remove download" sub="Frees space; stays in the cloud" onPress={() => uncacheItem(details)} />
-            )}
             <SheetRow icon="albums-outline" label="Move to album" onPress={() => setAlbumTarget({ ids: [details.id] })} />
-            <SheetRow icon="trash-outline" label="Delete" danger onPress={() => deleteIds([details.id])} />
+
+            {/* storage: where this file lives — on this device, in Supabase, or both */}
+            {cloud && (
+              <>
+                <Text style={{ color: theme.muted, fontSize: 11, fontWeight: "700", marginTop: 12, marginBottom: 2, letterSpacing: 0.4 }}>
+                  STORAGE · {details.cached !== false ? "on this device" : "not on device"}
+                  {details.remote ? " · backed up" : ""}
+                </Text>
+                {!details.remote ? (
+                  <SheetRow icon="cloud-upload-outline" label="Back up to Supabase" sub="Encrypted copy in the cloud" onPress={() => backupItem(details)} />
+                ) : (
+                  <SheetRow icon="cloud-offline-outline" label="Remove from Supabase" sub="Deletes the cloud copy; keeps it on this device" onPress={() => removeBackup(details)} />
+                )}
+                {details.remote && details.cached === false && (
+                  <SheetRow icon="cloud-download-outline" label="Save to this device" sub="Download a local copy" onPress={() => cacheItem(details)} />
+                )}
+                {details.remote && details.cached !== false && (
+                  <SheetRow icon="phone-portrait-outline" label="Remove local copy" sub="Frees space; stays backed up" onPress={() => uncacheItem(details)} />
+                )}
+              </>
+            )}
+
+            <View style={{ height: 8 }} />
+            {details.remote ? (
+              <SheetRow icon="trash-outline" label="Delete everywhere" sub="This device + Supabase" danger onPress={() => deleteEverywhere(details)} />
+            ) : (
+              <SheetRow icon="trash-outline" label="Delete" danger onPress={() => deleteIds([details.id])} />
+            )}
           </>
         )}
       </Sheet>
