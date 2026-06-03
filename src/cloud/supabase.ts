@@ -163,9 +163,19 @@ export interface Supabase {
   store: CloudStore;
 }
 
+// The project's PUBLIC config, baked in as a fallback so any deploy (Vercel
+// without env vars, an EAS build, a fresh clone) can sync without extra setup.
+// The anon key is public by design — it ships in the client bundle regardless —
+// and row-level security + the client-side AES-256-GCM encryption are what keep
+// data private. Override either via the EXPO_PUBLIC_* env vars to point the app
+// at a different Supabase project (or set them empty + edit here to go local).
+const DEFAULT_SUPABASE_URL = "https://aiheqgxdwqkpqoyifasu.supabase.co";
+const DEFAULT_SUPABASE_ANON_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFpaGVxZ3hkd3FrcHFveWlmYXN1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAzMjE4MTcsImV4cCI6MjA5NTg5NzgxN30.AZr5i0u_uFCK0Phh6dsTV1L0bptQA4ANiFsL2orwKDo";
+
 export function createSupabase(): Supabase | null {
-  const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
-  const key = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+  const url = process.env.EXPO_PUBLIC_SUPABASE_URL || DEFAULT_SUPABASE_URL;
+  const key = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
   if (!url || !key) return null;
   const client = createClient(url, key, {
     auth: {

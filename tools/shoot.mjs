@@ -237,6 +237,15 @@ try {
   await page.waitForTimeout(900);
   await shot(page, "14-chat-reader");
 
+  // Cloud sync is configured: the Home banner opens the connect form
+  await page.getByText("Vault", { exact: true }).first().click();
+  await page.waitForTimeout(400);
+  await page.click('[data-testid="tab-home"]');
+  await page.waitForTimeout(400);
+  await page.getByText("Sync across your devices").click();
+  await page.waitForTimeout(900);
+  await shot(page, "15-cloud-connect");
+
   // narrow viewport: the tab bar should move to the bottom (phone layout)
   await page.getByText("Vault", { exact: true }).first().click();
   await page.waitForTimeout(400);
