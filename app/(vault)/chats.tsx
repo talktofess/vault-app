@@ -45,7 +45,7 @@ function senderColor(name: string): string {
 }
 
 export default function ChatsScreen() {
-  const { vault, unlocked } = useVault();
+  const { vault, unlocked, withoutAutoLock } = useVault();
   const [chats, setChats] = useState<Chat[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
   const [me, setMe] = useState<string>("");
@@ -60,7 +60,7 @@ export default function ChatsScreen() {
   const openChat = chats.find((c) => c.id === openId) ?? null;
 
   async function importChat() {
-    const res = await DocumentPicker.getDocumentAsync({ multiple: true, copyToCacheDirectory: true });
+    const res = await withoutAutoLock(() => DocumentPicker.getDocumentAsync({ multiple: true, copyToCacheDirectory: true }));
     if (res.canceled) return;
     setBusy(true);
     try {

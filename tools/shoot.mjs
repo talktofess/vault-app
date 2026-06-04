@@ -59,7 +59,10 @@ try {
   await pin(page, "1234");
   await page.waitForTimeout(500);
   await pin(page, "1234");
-  await page.waitForTimeout(2000);
+  await page.waitForTimeout(1500);
+  // onboarding now offers chess unlock — keep the PIN for this run
+  await page.getByText("Keep the PIN").click().catch(() => {});
+  await page.waitForTimeout(1200);
   await shot(page, "02-library-empty");
 
   // the new unlock screen: dots + type-to-unlock (no pin keyboard, no labels)

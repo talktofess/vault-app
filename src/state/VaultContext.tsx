@@ -7,6 +7,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { AppState, Platform } from "react-native";
@@ -20,6 +21,11 @@ interface VaultCtx {
   unlocked: boolean;
   setUnlocked: (v: boolean) => void;
   lock: () => void;
+  // Run a function (a system file/photo picker, the camera, share sheet…)
+  // WITHOUT the app auto-locking while it's in the foreground-elsewhere. Opening
+  // a picker backgrounds the app, which would otherwise lock the vault and force
+  // a re-login when you come back. Re-arms the auto-lock shortly after it returns.
+  withoutAutoLock: <T>(fn: () => Promise<T>) => Promise<T>;
   // The Supabase handle, or null when cloud env vars aren't configured
   // (the app then runs purely local — every cloud UI affordance hides).
   cloud: Supabase | null;
@@ -39,25 +45,40 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
   const setUnlocked = useCallback((v: boolean) => setUnlockedState(v), []);
 
+  // When true, the auto-lock is paused — set while a system picker/camera is up.
+  const suppressLock = useRef(false);
+  const withoutAutoLock = useCallback(async <T,>(fn: () => Promise<T>): Promise<T> => {
+    suppressLock.current = true;
+    try {
+      return await fn();
+    } finally {
+      // keep it paused briefly so the return-to-foreground transition (which can
+      // emit a late background/inactive event) settles before we re-arm.
+      setTimeout(() => {
+        suppressLock.current = false;
+      }, 1200);
+    }
+  }, []);
+
   // Lock the moment the app leaves the foreground (background OR the iOS/Android
-  // app switcher 'inactive' state). Returning to the app always requires a
-  // fresh unlock — the key is wiped from memory on every exit. On web the analog
-  // is the tab becoming hidden (switching tabs, minimizing, closing).
+  // app switcher 'inactive' state) — UNLESS a picker is open (suppressLock).
+  // Returning to the app otherwise requires a fresh unlock; the key is wiped
+  // from memory on every real exit. On web the analog is the tab becoming hidden.
   useEffect(() => {
     if (Platform.OS === "web") {
       const onHide = () => {
-        if (typeof document !== "undefined" && document.visibilityState === "hidden") lock();
+        if (!suppressLock.current && typeof document !== "undefined" && document.visibilityState === "hidden") lock();
       };
       document.addEventListener("visibilitychange", onHide);
       return () => document.removeEventListener("visibilitychange", onHide);
     }
     const sub = AppState.addEventListener("change", (next) => {
-      if (next === "background" || next === "inactive") lock();
+      if (!suppressLock.current && (next === "background" || next === "inactive")) lock();
     });
     return () => sub.remove();
   }, [lock]);
 
-  const value: VaultCtx = { vault, unlocked, setUnlocked, lock, cloud };
+  const value: VaultCtx = { vault, unlocked, setUnlocked, lock, withoutAutoLock, cloud };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

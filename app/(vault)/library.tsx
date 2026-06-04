@@ -83,7 +83,7 @@ const TABS: { key: Section; label: string; icon: keyof typeof Ionicons.glyphMap 
 ];
 
 export default function Library() {
-  const { vault, unlocked, cloud } = useVault();
+  const { vault, unlocked, cloud, withoutAutoLock } = useVault();
   const [items, setItems] = useState<VaultItem[]>([]);
   const [folders, setFolders] = useState<string[]>([]); // explicitly-created folders
   const [query, setQuery] = useState("");
@@ -347,16 +347,18 @@ export default function Library() {
 
   async function importPhotos(kind: "all" | "image" | "video" = "all") {
     setImportMenu(false);
-    const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes:
-        kind === "image"
-          ? ImagePicker.MediaTypeOptions.Images
-          : kind === "video"
-            ? ImagePicker.MediaTypeOptions.Videos
-            : ImagePicker.MediaTypeOptions.All,
-      quality: 1,
-      allowsMultipleSelection: true,
-    });
+    const res = await withoutAutoLock(() =>
+      ImagePicker.launchImageLibraryAsync({
+        mediaTypes:
+          kind === "image"
+            ? ImagePicker.MediaTypeOptions.Images
+            : kind === "video"
+              ? ImagePicker.MediaTypeOptions.Videos
+              : ImagePicker.MediaTypeOptions.All,
+        quality: 1,
+        allowsMultipleSelection: true,
+      })
+    );
     if (res.canceled) return;
     setBusy("Reading…");
     const pend: Pending[] = [];
@@ -403,7 +405,7 @@ export default function Library() {
 
   async function importFiles() {
     setImportMenu(false);
-    const res = await DocumentPicker.getDocumentAsync({ multiple: true, copyToCacheDirectory: true });
+    const res = await withoutAutoLock(() => DocumentPicker.getDocumentAsync({ multiple: true, copyToCacheDirectory: true }));
     if (res.canceled) return;
     setBusy("Reading…");
     const pend: Pending[] = [];
@@ -437,7 +439,7 @@ export default function Library() {
     const baseAlbum = currentAlbum ?? ""; // if inside a folder, nest under it
     let files;
     try {
-      files = await pickFolder();
+      files = await withoutAutoLock(() => pickFolder());
     } catch (e) {
       Alert.alert("Couldn't read folder", e instanceof Error ? e.message : "Failed.");
       return;
@@ -738,7 +740,8 @@ export default function Library() {
   async function exportItem(item: VaultItem) {
     try {
       const data = await readBytes(item);
-      await saveBytes(item.name, item.mime, data);
+      // the share sheet backgrounds the app too — don't auto-lock during it
+      await withoutAutoLock(() => saveBytes(item.name, item.mime, data));
     } catch (e) {
       Alert.alert("Export failed", e instanceof Error ? e.message : "Could not export.");
     }

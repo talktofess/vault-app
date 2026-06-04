@@ -55,7 +55,7 @@ function parseVcards(text: string): Contact[] {
 const decodeVal = (v: string) => v.replace(/\\n/gi, " ").replace(/\\,/g, ",").replace(/\\;/g, ";").trim();
 
 export default function ContactsScreen() {
-  const { vault, unlocked } = useVault();
+  const { vault, unlocked, withoutAutoLock } = useVault();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<Contact | null>(null);
@@ -76,7 +76,7 @@ export default function ContactsScreen() {
   }, [contacts, query]);
 
   async function importVcf() {
-    const res = await DocumentPicker.getDocumentAsync({ multiple: true, copyToCacheDirectory: true });
+    const res = await withoutAutoLock(() => DocumentPicker.getDocumentAsync({ multiple: true, copyToCacheDirectory: true }));
     if (res.canceled) return;
     setBusy(true);
     try {
