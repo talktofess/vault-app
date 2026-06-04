@@ -1319,7 +1319,7 @@ export default function Library() {
                 {/* media */}
                 <View style={{ flex: 1 }}>
                   {!preview.av && <Image source={{ uri: preview.uri }} style={{ flex: 1 }} resizeMode="contain" />}
-                  {preview.av && <VideoPlayer uri={preview.uri} onRequestNext={() => gotoAdjacent(1)} />}
+                  {preview.av && <VideoPlayer uri={preview.uri} onRequestNext={() => gotoAdjacent(1)} onRequestPrev={() => gotoAdjacent(-1)} />}
 
                   {media.length > 1 && (
                     <>
