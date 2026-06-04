@@ -261,6 +261,16 @@ export default function Settings() {
       </Section>
 
       {!isDecoy && (
+        <Section icon="grid-outline" title="Chess unlock">
+          <Muted>
+            Unlock by playing a secret sequence of chess moves on the disguise board instead of a PIN —
+            faster, and it hides in plain sight. You can switch back any time with Change PIN.
+          </Muted>
+          <Button label="Set up chess unlock" onPress={() => router.push("/(vault)/chess-setup")} variant="outline" />
+        </Section>
+      )}
+
+      {!isDecoy && (
         <Section icon="eye-off-outline" title="Decoy (duress) PIN">
           <Muted>
             Set a second PIN that opens a separate, empty vault. If anyone ever

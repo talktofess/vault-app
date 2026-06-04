@@ -67,6 +67,10 @@ export interface VaultManifest {
   // real unlock; drives the failed-attempt lockout delay.
   intrusions?: number[]; // timestamps of failed unlock attempts since last success
   failedStreak?: number; // consecutive failures, for the lockout backoff
+  // If set, this vault unlocks by playing a fixed-length sequence of chess moves
+  // on the disguise board (instead of a PIN). Only the move COUNT is stored here
+  // (plaintext, readable before unlock) — never the moves themselves.
+  chessLen?: number;
 }
 
 // The item index, stored ENCRYPTED under the DEK (so even names are private).

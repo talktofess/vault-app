@@ -7,7 +7,7 @@
 //   every item     = AES-256-GCM under the DEK
 // Changing the password only re-wraps the DEK (no re-encrypting of items).
 
-import { deriveKey, KDF_ITERATIONS, SALT_LEN } from "../crypto/kdf";
+import { deriveKey, KDF_ITERATIONS, CHESS_KDF_ITERATIONS, SALT_LEN } from "../crypto/kdf";
 import { open, seal, type Sealed } from "../crypto/cipher";
 import { randomBytes } from "../crypto/random";
 import { bytesToUtf8, fromB64, toB64, utf8ToBytes } from "../crypto/b64";
@@ -119,7 +119,7 @@ export class VaultService {
    * instead (isDecoy() === true) — the caller can't tell the difference, which
    * is the point.
    */
-  async unlock(password: string): Promise<boolean> {
+  async unlock(password: string, logFailure = true): Promise<boolean> {
     const m = await this.loadManifest();
 
     // 1. try the real password
@@ -157,8 +157,9 @@ export class VaultService {
       }
     }
 
-    // total failure -> log the intrusion
-    await this.onUnlockFailure(m);
+    // total failure -> log the intrusion (skipped for the chess disguise, where
+    // "wrong" move sequences are just normal play, not break-in attempts).
+    if (logFailure) await this.onUnlockFailure(m);
     return false;
   }
 
@@ -472,9 +473,54 @@ export class VaultService {
       kdf: { salt: toB64(salt), iterations: KDF_ITERATIONS },
       wrappedDek: seal(newMk, dek),
       verifier: seal(newMk, utf8ToBytes(VERIFIER_PLAINTEXT)),
+      chessLen: undefined, // changing to a PIN turns chess-move unlock off
     };
     await this.storage.writeManifest(JSON.stringify(updated));
     if (this.sessionPin === oldPw) this.sessionPin = newPw;
+  }
+
+  // ---- chess-move unlock ----
+
+  /** Move count if this vault unlocks by chess moves, else null. Readable before
+   *  unlock (it's plaintext in the manifest) so the disguise knows when to try. */
+  async getChessLen(): Promise<number | null> {
+    try {
+      return (await this.loadManifest()).chessLen ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Switch this device's unlock from `currentSecret` (the PIN, or the existing
+   * move secret) to a new chess-move secret. Re-wraps the DEK under the move
+   * secret with a lower iteration count (more entropy than a PIN), and records
+   * the move COUNT so the disguise knows when to attempt an unlock. Pass
+   * chessLen = 0 to turn the chess unlock OFF (back to a plain password).
+   */
+  async setChessUnlock(currentSecret: string, newSecret: string, chessLen: number): Promise<void> {
+    const m = await this.loadManifest();
+    const oldMk = deriveKey(currentSecret, fromB64(m.kdf.salt), m.kdf.iterations);
+    let dek: Uint8Array;
+    try {
+      if (bytesToUtf8(open(oldMk, m.verifier)) !== VERIFIER_PLAINTEXT) throw new Error("wrong");
+      dek = open(oldMk, m.wrappedDek);
+    } catch {
+      throw new Error("Current PIN is incorrect");
+    }
+    const salt = randomBytes(SALT_LEN);
+    const iterations = chessLen > 0 ? CHESS_KDF_ITERATIONS : KDF_ITERATIONS;
+    const newMk = deriveKey(newSecret, salt, iterations);
+    const updated: VaultManifest = {
+      ...m,
+      version: 1,
+      kdf: { salt: toB64(salt), iterations },
+      wrappedDek: seal(newMk, dek),
+      verifier: seal(newMk, utf8ToBytes(VERIFIER_PLAINTEXT)),
+      chessLen: chessLen > 0 ? chessLen : undefined,
+    };
+    await this.storage.writeManifest(JSON.stringify(updated));
+    this.sessionPin = newSecret;
   }
 
   /**

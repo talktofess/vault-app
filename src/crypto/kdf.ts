@@ -7,6 +7,10 @@ import { utf8ToBytes } from "./b64";
 // (scrypt is stronger against GPUs; PBKDF2 is chosen for broad, reliable
 // support on-device. Iteration count is tunable below.)
 export const KDF_ITERATIONS = 150_000;
+// A chess-move unlock secret has much more entropy than a 4-digit PIN, so it can
+// use a lower iteration count and still resist brute force — which makes the
+// (pure-JS, on-device) unlock noticeably faster.
+export const CHESS_KDF_ITERATIONS = 50_000;
 export const KEY_LEN = 32; // 256-bit key
 export const SALT_LEN = 16;
 

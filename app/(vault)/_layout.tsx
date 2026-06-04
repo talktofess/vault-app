@@ -117,6 +117,7 @@ export default function VaultTabs() {
       <Tabs.Screen name="notes" options={{ href: null, title: "Notes" }} />
       <Tabs.Screen name="files" options={{ href: null, title: "Files" }} />
       <Tabs.Screen name="cloud" options={{ href: null, title: "Cloud sync" }} />
+      <Tabs.Screen name="chess-setup" options={{ href: null, title: "Chess unlock" }} />
       <Tabs.Screen name="passwords" options={{ title: "Keys", headerShown: false }} />
       <Tabs.Screen name="calendar" options={{ title: "Dates", headerShown: false }} />
       <Tabs.Screen name="contacts" options={{ title: "People", headerShown: false }} />
