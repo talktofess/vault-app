@@ -41,7 +41,16 @@ export default function Onboarding() {
     try {
       await vault.create(value);
       setUnlocked(true);
-      router.replace("/(vault)/library");
+      // Offer the chess-move unlock right away so the PIN screen can be skipped
+      // entirely from here on (you'll re-enter this PIN once to authorise it).
+      Alert.alert(
+        "Vault created",
+        "Prefer to unlock by playing a secret sequence of chess moves instead of typing this PIN? You can change this any time in Settings.",
+        [
+          { text: "Keep the PIN", onPress: () => router.replace("/(vault)/library") },
+          { text: "Use chess moves", onPress: () => router.replace("/(vault)/chess-setup") },
+        ]
+      );
     } catch (e) {
       Alert.alert("Error", e instanceof Error ? e.message : "Could not create vault");
       setFirst("");

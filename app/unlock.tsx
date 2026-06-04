@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, View } from "react-native";
+import { Alert, Platform, View } from "react-native";
 import { router } from "expo-router";
 import { useVault } from "../src/state/VaultContext";
 import { Screen } from "../src/ui/components";
-import { PIN_LENGTH, PinDots } from "../src/ui/PinPad";
+import { PIN_LENGTH, PinDots, PinPad } from "../src/ui/PinPad";
 import { promptBiometric } from "../src/platform/expoKeychain";
 
 export default function Unlock() {
@@ -76,12 +76,15 @@ export default function Unlock() {
   return (
     <Screen>
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-        <PinDots
-          pin={pin}
-          onChange={setPin}
-          disabled={busy}
-          onBiometric={hasBio ? withBiometric : undefined}
-        />
+        {/* The hidden "type" field is unreliable on phones (autofill / dropped
+            keystrokes corrupt the PIN), so phones use the tappable keypad — the
+            same one onboarding uses, so what you set is what you can re-enter.
+            Web keeps the minimal dots + keyboard. */}
+        {Platform.OS === "web" ? (
+          <PinDots pin={pin} onChange={setPin} disabled={busy} onBiometric={hasBio ? withBiometric : undefined} />
+        ) : (
+          <PinPad pin={pin} onChange={setPin} disabled={busy} onBiometric={hasBio ? withBiometric : undefined} />
+        )}
       </View>
     </Screen>
   );

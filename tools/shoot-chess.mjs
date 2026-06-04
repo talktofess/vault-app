@@ -17,11 +17,10 @@ p.on("pageerror", (e) => console.log("PAGEERR:", e.message));
 try {
   await p.goto(BASE, { waitUntil: "load" }); await p.waitForTimeout(3000);
   await p.waitForSelector('[data-testid="pinkey-1"]', { timeout: 12000 });
-  await pin(p, "1234"); await p.waitForTimeout(500); await pin(p, "1234"); await p.waitForTimeout(2500);
-  // Settings -> Set up chess unlock
-  await p.getByText("Settings", { exact: true }).first().click(); await p.waitForTimeout(800);
-  await p.getByText("Set up chess unlock").click(); await p.waitForTimeout(800);
-  await shot(p, "c1-setup-pin");
+  await pin(p, "1234"); await p.waitForTimeout(500); await pin(p, "1234"); await p.waitForTimeout(2000);
+  // onboarding now offers chess unlock straight away
+  await p.getByText("Use chess moves").click(); await p.waitForTimeout(900);
+  await shot(p, "c1-setup-pin"); // chess-setup asks for the PIN to authorise
   await pin(p, "1234"); await p.waitForTimeout(800); // -> record step
   await shot(p, "c2-record");
   for (const [f, t] of SEQ) await mv(p, f, t);
